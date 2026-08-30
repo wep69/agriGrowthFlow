@@ -32,60 +32,10 @@ navbar:
       - text: Release Workflow
         href: articles/v30-foundations-to-release-tutorial.html
 reference:
-- title: Data & Design
+- title: Reference
+  desc: All exported functions grouped automatically.
   contents:
-  - growth_data
-  - growth_design
-  - growth_validate
-  - growth_example_data
-  - growth_plan
-  - growth_plot
-- title: Classical & Traits
-  contents:
-  - growth_agr
-  - growth_rgr
-  - growth_nar
-  - growth_lar
-  - growth_sla
-  - growth_lmr
-  - growth_lai
-  - growth_cgr
-  - growth_lad
-  - growth_partition
-  - growth_allometry
-- title: Parametric Growth
-  contents:
-  - growth_models
-  - growth_start
-  - growth_fit
-  - growth_predict
-  - growth_compare
-  - growth_traits
-- title: Longitudinal & Flexible
-  contents:
-  - growth_mixed
-  - growth_smooth
-  - growth_fpca
-  - growth_manova
-- title: Uncertainty
-  contents:
-  - growth_boot
-  - growth_bayes
-  - growth_loo
-- title: Biological Events
-  contents:
-  - growth_multiphase
-  - growth_changepoint
-  - growth_defoliation
-  - growth_competition
-  - growth_threshold
-- title: Consolidated Release
-  contents:
-  - growth_method_guide
-  - growth_workflow
-  - growth_table
-  - growth_report
-  - growth_export
+  - starts_with('growth_')
 articles:
 - title: All vignettes
   contents:
