@@ -1,0 +1,110 @@
+---
+title: "Crop Growth Integrals: CGR, LAI, and LAD"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Crop Growth Integrals: CGR, LAI, and LAD}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(agriGrowthFlow)
+```
+
+# 1. From plant growth to stand productivity
+
+Classical crop analysis adds a land-area basis. Crop growth rate describes dry-mass accumulation per ground area and time, while LAI and LAD describe canopy deployment [@Hunt1990].
+
+# 2. Crop growth rate
+
+For biomass $W$ measured over ground area $G$,
+
+$$
+CGR = \frac{W_2-W_1}{G(t_2-t_1)}.
+$$
+
+```{r}
+growth_cgr(w1 = 100, w2 = 180, t1 = 20, t2 = 30, ground_area = 0.5)
+```
+
+The result inherits the biomass, area and time units supplied by the user.
+
+# 3. Leaf area index
+
+```{r}
+growth_lai(leaf_area = 1.8, ground_area = 0.5)
+```
+
+LAI should use a clearly defined leaf-area convention. Projected versus total surface area must not be mixed across treatments or dates.
+
+# 4. Leaf area duration
+
+LAD is the integral of LAI over time. Version 0.1.0 uses trapezoidal integration.
+
+```{r}
+lai <- c(0.4, 1.3, 2.8, 4.0, 3.1, 1.7)
+time <- c(15, 30, 45, 60, 75, 90)
+growth_lad(lai, time)
+growth_lad(lai, time, intervals = TRUE)
+```
+
+The trapezoidal rule is transparent and appropriate for a foundational discrete-harvest calculation. It should not be mistaken for a fitted physiological canopy model.
+
+# 5. Integrated example
+
+```{r}
+d <- growth_example_data("maize_destructive")
+g <- growth_data(
+  d, time = "day", sampling = "destructive",
+  experimental_unit = "plot_id", treatment = "nitrogen", block = "block",
+  total_mass = "total_mass_g", leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g", ground_area = "ground_area_m2"
+)
+idx <- growth_indices(g)
+head(idx$intervals[c("plot_id", "nitrogen", "t1", "t2", "CGR", "LAI1", "LAI2", "LAD")])
+```
+
+# 6. Whole-season LAD by plot
+
+The interval table can be summed within plot because adjacent interval LAD contributions use a common unit and time basis.
+
+```{r}
+lad_plot <- aggregate(LAD ~ plot_id + nitrogen + block, idx$intervals, sum)
+head(lad_plot)
+```
+
+# 7. Interpretation limits
+
+Hunt discusses approximate relationships between yield, LAD and mean unit leaf rate, while warning that equal areas beneath an LAI curve are not necessarily equal opportunities for assimilation because environment and canopy physiology change through time [@Hunt1990].
+
+Therefore:
+
+- LAD is not accumulated photosynthesis;
+- high LAI can include self-shaded leaves;
+- longer LAD can reflect delayed senescence without necessarily increasing harvestable yield;
+- treatment comparisons should consider radiation, phenology and stress when those processes are central.
+
+# 8. Irregular harvest intervals
+
+Trapezoidal integration naturally uses the actual interval width. Do not replace irregular times with equally spaced sequence numbers.
+
+```{r}
+growth_lad(c(0.5, 1.4, 2.5, 2.0), c(12, 25, 51, 78), intervals = TRUE)
+```
+
+# 9. Ground area must be stable or explicitly handled
+
+`growth_indices()` carries beginning and ending ground area. The current CGR implementation uses their mean when a small numerical difference occurs. Experiments with genuinely changing sampled ground area should be harmonized to a common area basis before interpretation; changing quadrat size is not a biological growth process.
+
+# 10. Reporting
+
+State whether biomass is above-ground or total biomass, whether area is sampled quadrat area or extrapolated land area, how LAI was measured, the temporal integration rule, and whether the full season was covered.
+
+# References

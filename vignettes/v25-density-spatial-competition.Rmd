@@ -1,0 +1,381 @@
+---
+title: "Density, Neighborhood Competition, and Coupled Plant Growth"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Density, Neighborhood Competition, and Coupled Plant Growth}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.5)
+```
+
+# Overview
+
+Competition changes both average plant size and the distribution of sizes within a stand. Version 0.5.0 provides three deliberately transparent tools that operate at different levels:
+
+1. `growth_density()` for individual mass versus stand density;
+2. `growth_neighbor()` for a local size-distance index;
+3. `growth_competition()` for generic coupled logistic dynamics.
+
+Gates analyzed a spatial system of coupled nonlinear differential equations in which competition can amplify size variability and generate negative association among neighboring plants [@Gates1982]. The simulator in `agriGrowthFlow` is inspired by the general idea of coupled growth, but it is not the exact zone-of-influence model in that paper.
+
+# Density response
+
+Panik reviews yield-density relations among several growth applications [@Panik2014]. A simple reciprocal individual-size model is
+
+$$
+\frac{1}{W}=a+bD,
+$$
+
+where $W$ is individual plant mass and $D$ is density.
+
+```{r}
+library(agriGrowthFlow)
+maize <- growth_example_data("maize_density")
+dens <- growth_density(maize, density="density_plants_m2", plant_mass="plant_mass_g")
+dens
+```
+
+This model is a compact empirical relation. It should not be interpreted as a mechanistic resource-allocation equation without additional evidence.
+
+# Treatment-specific density curves
+
+```{r, eval=FALSE}
+low <- growth_density(subset(maize, nitrogen=="low"), "density_plants_m2", "plant_mass_g")
+high <- growth_density(subset(maize, nitrogen=="high"), "density_plants_m2", "plant_mass_g")
+coef(low$fit)
+coef(high$fit)
+```
+
+The reciprocal slope describes how strongly inverse individual size changes with density on this scale. Stand yield can behave differently from individual mass, so both levels should be plotted when agronomic decisions concern yield per area.
+
+# Neighborhood competition
+
+The `tree_competition` data contain a simulated regular grid and plant-size variation.
+
+```{r}
+trees <- growth_example_data("tree_competition")
+head(trees)
+ci <- growth_neighbor(trees, id="plant_id", x="x_m", y="y_m", size="size_cm", radius=3)
+head(ci)
+```
+
+The index is
+
+$$
+CI_i=\sum_{j\ne i}\frac{(S_j/S_i)^q}{d_{ij}^p},
+$$
+
+within a user-defined radius. It is transparent by construction. The exponents $p$ and $q$ are analyst choices, not universal biological constants.
+
+# Sensitivity to the neighborhood definition
+
+```{r, eval=FALSE}
+ci3 <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=3)
+ci5 <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5)
+ci_d2 <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5, distance_power=2)
+```
+
+A competition conclusion that changes completely when radius moves from 3 to 3.5 m indicates sensitivity to the neighborhood definition. That sensitivity is a result worth reporting.
+
+# Coupled logistic dynamics
+
+For plant $i$, the generic simulator uses
+
+$$
+\frac{dW_i}{dt}=r_iW_i\left[1-\frac{W_i+\sum_j \alpha_{ij}W_j}{K_i}\right].
+$$
+
+The matrix $\alpha$ determines pairwise competitive pressure. The diagonal is set to zero because self-limitation is represented separately by $W_i/K_i$.
+
+```{r}
+A <- matrix(c(0,.2,.2,0),2,2)
+sim <- growth_competition(c(1,1), times=0:10, r=.4, K=20, competition_matrix=A, dt=.05)
+head(sim$trajectory)
+```
+
+The equations are integrated with fourth-order Runge-Kutta. Reducing `dt` should be used as a numerical sensitivity check.
+
+# No-competition benchmark
+
+Setting all off-diagonal coefficients to zero should recover independent logistic trajectories.
+
+```{r, eval=FALSE}
+s0 <- growth_competition(c(1,2), times=seq(0,10,1), r=c(.3,.4), K=c(20,25), competition_matrix=matrix(0,2,2), dt=.02)
+```
+
+This benchmark is useful for unit tests and for understanding how the competition matrix changes trajectories.
+
+# From coordinates to a competition matrix
+
+`growth_neighbor()` returns one scalar index per plant, not a pairwise matrix. For simulation, a user may construct $\alpha_{ij}$ from distance, canopy overlap, root overlap, genetic identity, or a calibrated neighborhood model. The package deliberately does not impose a single conversion.
+
+# Relation to cellular automata
+
+The outputs of `growth_competition()` can be passed to spatial simulation workflows, while a cellular-automata model can provide time-varying competition matrices or neighborhood states to `agriGrowthFlow`. The two approaches answer different questions: the growth package focuses on trajectories and derived growth quantities, while cellular automata represent spatial state transitions.
+
+# Common errors
+
+1. Treating plant density and neighborhood competition as the same variable.
+2. Using individual mass to infer stand yield without multiplying by density or measuring area yield.
+3. Choosing a radius after seeing the desired treatment result.
+4. Calling the generic coupled logistic simulator the Gates zone-of-influence model.
+5. Ignoring edge plants in a finite spatial grid.
+6. Failing to test integration-step sensitivity.
+7. Treating a competition index as causal without a design or mechanistic argument.
+
+# Reporting
+
+Report density units, coordinate units, size variable, neighborhood radius, exponents, edge handling, competition-matrix construction, integration step, and initial conditions. If the spatial index is exploratory, say so.
+
+# Exercises
+
+## Exercise 1
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=4, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 2
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 3
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=3, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 4
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=4, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 5
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 6
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=3, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 7
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=4, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 8
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 9
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=3, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 10
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=4, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 11
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 12
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=3, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 13
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=4, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 14
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 15
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=3, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 16
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=4, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 17
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 18
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=3, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 19
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=4, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 20
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 21
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=3, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 22
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=4, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 23
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 24
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=3, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 25
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=4, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 26
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=5, distance_power=1)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+## Exercise 27
+
+Recalculate the neighborhood index with at least two radii and two distance exponents. Rank plants by competition and identify whether the ranking is stable. Then simulate a three-plant coupled logistic system with and without competition and compare final size and between-plant variability.
+
+```{r, eval=FALSE}
+ci_ex <- growth_neighbor(trees, "plant_id", "x_m", "y_m", "size_cm", radius=3, distance_power=2)
+head(ci_ex[order(-ci_ex$competition_index), ])
+```
+
+# References
+
+See @Gates1982 for a mathematically explicit plantation competition model and @Panik2014 for broader growth and yield-density modeling context.

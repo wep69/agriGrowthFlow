@@ -1,0 +1,122 @@
+url: https://wep69.github.io/agriGrowthFlow/
+template:
+  bootstrap: 5
+  bslib:
+    bg: "#ffffff"
+    fg: "#202020"
+    primary: "#1a6a4a"
+    border-radius: 0.4rem
+home:
+  title: agriGrowthFlow
+  description: Design-Aware Plant Growth and Longitudinal Trajectory Analysis
+navbar:
+  structure:
+    left: [intro, reference, articles, tutorials, news]
+    right: [search, github]
+  components:
+    articles:
+      text: Articles
+      menu:
+      - text: Overview
+        href: articles/v00-overview.html
+      - text: Data & Design
+        href: articles/v01-data-design-validation.html
+      - text: Classical Growth
+        href: articles/v02-classical-growth-analysis.html
+      - text: Parametric Models
+        href: articles/v07-parametric-model-library.html
+      - text: Longitudinal Mixed
+        href: articles/v12-longitudinal-mixed-effects.html
+      - text: Flexible Smoothing
+        href: articles/v13-flexible-smoothing-derivatives.html
+      - text: Release Workflow
+        href: articles/v30-foundations-to-release-tutorial.html
+reference:
+- title: Data & Design
+  contents:
+  - growth_data
+  - growth_design
+  - growth_validate
+  - growth_example_data
+  - growth_plan
+  - growth_plot
+- title: Classical & Traits
+  contents:
+  - growth_agr
+  - growth_rgr
+  - growth_nar
+  - growth_lar
+  - growth_sla
+  - growth_lmr
+  - growth_lai
+  - growth_cgr
+  - growth_lad
+  - growth_partition
+  - growth_allometry
+- title: Parametric Growth
+  contents:
+  - growth_models
+  - growth_start
+  - growth_fit
+  - growth_predict
+  - growth_compare
+  - growth_traits
+- title: Longitudinal & Flexible
+  contents:
+  - growth_mixed
+  - growth_smooth
+  - growth_fpca
+  - growth_manova
+- title: Uncertainty
+  contents:
+  - growth_boot
+  - growth_bayes
+  - growth_loo
+- title: Biological Events
+  contents:
+  - growth_multiphase
+  - growth_changepoint
+  - growth_defoliation
+  - growth_competition
+  - growth_threshold
+- title: Consolidated Release
+  contents:
+  - growth_method_guide
+  - growth_workflow
+  - growth_table
+  - growth_report
+  - growth_export
+articles:
+- title: All vignettes
+  contents:
+  - v00-overview
+  - v01-data-design-validation
+  - v02-classical-growth-analysis
+  - v03-leaf-traits-and-canopy
+  - v04-crop-growth-integrals
+  - v05-partitioning-allometry
+  - v06-foundations-to-advanced-tutorial
+  - v07-parametric-model-library
+  - v08-starting-values-and-multistart
+  - v09-model-comparison-diagnostics
+  - v10-derived-growth-traits
+  - v11-parametric-growth-workflow
+  - v12-longitudinal-mixed-effects
+  - v13-flexible-smoothing-derivatives
+  - v14-shape-constrained-growth
+  - v15-functional-growth-fpca
+  - v16-multivariate-growth-manova
+  - v17-longitudinal-flexible-workflow
+  - v18-design-aware-bootstrap
+  - v19-bootstrap-traits-selection
+  - v20-bayesian-nonlinear-growth
+  - v21-bayesian-diagnostics-loo-averaging
+  - v22-uncertainty-workflow
+  - v23-multiphasic-growth-stability
+  - v24-disturbance-defoliation-compensation
+  - v25-density-spatial-competition
+  - v26-design-schedule-harvest-power
+  - v27-biological-events-decisions-workflow
+  - v28-release-workflow-contract
+  - v29-reporting-audit-export
+  - v30-foundations-to-release-tutorial

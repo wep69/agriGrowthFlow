@@ -1,0 +1,64 @@
+Package: agriGrowthFlow
+Type: Package
+Title: Design-Aware Plant Growth and Longitudinal Trajectory Analysis
+Version: 1.0.0
+Authors@R: c(
+    person("Walter Esfrain", "Pereira", email = "wep@cca.ufpb.br", role = c("aut", "cre", "cph"),
+           comment = c(ORCID = "0000-0003-1085-0191")),
+    person("Magali Haidee", "Pereira Martinez", role = "aut",
+           comment = c(ORCID = "0009-0009-5419-959X"))
+  )
+Description: Provides a design-aware workflow for plant growth analysis. The
+    foundational layer validates destructive and repeated sampling structures and
+    calculates classical growth indices, biomass partitioning, and allometry. The
+    parametric layer fits biologically interpretable nonlinear growth curves with
+    guarded initialization, diagnostics, prediction, and derived traits. The
+    longitudinal and flexible layer adds mixed-effects growth-curve analysis,
+    explicit residual correlation and variance structures, smoothing splines,
+    LOESS, generalized additive and shape-constrained additive trajectories,
+    first and second derivatives, functional principal component analysis, and
+    multivariate comparison of orthogonal growth components. The uncertainty
+    layer adds design-aware bootstrap resampling, bootstrap confidence intervals,
+    model-selection stability, Bayesian nonlinear hierarchical growth models,
+    prior and posterior predictive checks, posterior growth-trait uncertainty,
+    MCMC diagnostics, Pareto-smoothed leave-one-out evaluation, and stacking or
+    pseudo-BMA model weighting. The biological-events and decisions layer adds
+    ordered multiphase logistic trajectories, numerical stability points, exploratory
+    changepoints, measured biomass-loss events, iterative defoliation analysis,
+    compensatory-growth summaries, density and neighborhood competition tools,
+    coupled logistic competition simulations, biologically defined thresholds and
+    plateaus, model-conditioned harvest optimization, observation-schedule heuristics,
+    design simulation, and Monte Carlo power for derived growth traits. The
+    consolidated release adds design-aware method guidance, auditable workflow
+    orchestration, standardized result tables, Markdown reporting, and reproducible
+    export bundles while preserving access to all specialist modules. Methods preserve
+    the persistent experimental unit and do not treat destructive subsamples as
+    independent longitudinal individuals.
+License: MIT + file LICENSE
+URL: https://github.com/wep69/agriGrowthFlow, https://wep69.github.io/agriGrowthFlow/
+BugReports: https://github.com/wep69/agriGrowthFlow/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Depends: R (>= 4.2.0)
+Imports:
+    ggplot2,
+    rlang,
+    stats,
+    utils
+Suggests:
+    knitr,
+    minpack.lm,
+    nlme,
+    mgcv,
+    scam,
+    refund,
+    fdapace,
+    brms (>= 2.20.0),
+    posterior (>= 1.6.0),
+    loo (>= 2.8.0),
+    cmdstanr (>= 0.5.0),
+    rmarkdown,
+    testthat (>= 3.0.0)
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.1.0

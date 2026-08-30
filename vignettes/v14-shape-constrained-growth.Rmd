@@ -1,0 +1,311 @@
+---
+title: "agriGrowthFlow 0.3.0: Shape-Constrained Plant Growth"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 0.3.0: Shape-Constrained Plant Growth}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+
+# 1. Purpose
+
+Biological knowledge sometimes imposes a qualitative shape constraint. Plant height during a vegetative observation window may be nondecreasing. Green canopy area during a defined senescence phase may be nonincreasing. A conventional flexible smoother can violate such knowledge because it follows sampling noise. Shape-constrained additive models provide a principled alternative [@PyaWood2015].
+
+# 2. The constraint is part of the scientific model
+
+A monotonicity constraint should be stated explicitly:
+
+$$
+f'(t) \ge 0
+$$
+
+for increasing growth, or
+
+$$
+f'(t) \le 0
+$$
+
+for decline.
+
+The constraint is not a cosmetic filter applied after fitting.
+
+# 3. Why unconstrained smooths can wiggle
+
+Noise, sparse measurements, irregular timing, and local leverage can make a flexible smooth show small reversals. Some reversals are artifacts; others are real biological responses. The analyst must distinguish these possibilities rather than force all curves into monotonicity.
+
+# 4. A repeated height example
+
+```{r}
+bean <- growth_example_data("bean_repeated")
+```
+
+Inspect individual trajectories first:
+
+```{r}
+plot(bean$day, bean$height_cm,
+     xlab = "Day", ylab = "Height (cm)",
+     pch = 16, cex = 0.5)
+```
+
+# 5. Unconstrained benchmark
+
+```{r}
+s0 <- growth_smooth(
+  bean,
+  time = "day",
+  response = "height_cm",
+  method = "smooth_spline"
+)
+
+growth_smooth_traits(s0)
+```
+
+# 6. Increasing SCAM
+
+```{r}
+if (requireNamespace("scam", quietly = TRUE) && requireNamespace("mgcv", quietly = TRUE)) {
+  sm <- growth_smooth(
+    bean,
+    time = "day",
+    response = "height_cm",
+    method = "scam",
+    constraint = "increasing",
+    k = 6
+  )
+  sm
+}
+```
+
+The wrapper uses a monotone-increasing P-spline basis supplied by `scam`.
+
+# 7. Verify the derivative numerically
+
+```{r eval=FALSE}
+d1 <- growth_derivative(sm, order = 1, n = 200)
+min(d1$derivative, na.rm = TRUE)
+```
+
+Finite-difference error can produce tiny numerical values near zero. Interpret meaningful violations, not machine precision.
+
+# 8. Treatment-specific constrained curves
+
+```{r eval=FALSE}
+smg <- growth_smooth(
+  bean,
+  time = "day",
+  response = "height_cm",
+  group = "water_regime",
+  method = "scam",
+  constraint = "increasing",
+  k = 6
+)
+```
+
+These are descriptive group smooths. They are not a formal test of equality between treatment functions.
+
+# 9. Decreasing SCAM
+
+For a senescence-only data window:
+
+```{r eval=FALSE}
+sd <- growth_smooth(
+  senescence,
+  time = "day_after_peak",
+  response = "green_leaf_area",
+  method = "scam",
+  constraint = "decreasing"
+)
+```
+
+# 10. Whole-season warning
+
+A crop canopy commonly increases, reaches a maximum, and declines. A single monotone constraint over the full season is biologically false. Split phases only when phase definition is scientifically justified, or use an unconstrained or multiphasic model.
+
+# 11. Constraint versus data deletion
+
+If one late height observation is slightly lower than the preceding value, do not delete it simply to preserve monotonicity. A shape-constrained model can retain the observation while estimating a monotone systematic trend.
+
+# 12. Constraint versus measurement process
+
+Apparent decreases in image-derived canopy area may reflect leaf angle or overlap rather than actual loss of tissue. The meaning of the trait should be considered before imposing a biological shape.
+
+# 13. SCOP-spline idea
+
+Pya and Wood represent constrained smooth components using extensions of P-splines and impose derivative-sign restrictions in the model parameterization [@PyaWood2015]. This allows smoothness estimation and shape constraints to be handled jointly rather than by manual post-processing.
+
+# 14. Increasing is not necessarily sigmoid
+
+Monotonicity alone permits many shapes. A constrained smooth can increase rapidly, slowly, or in multiple rate phases without requiring one asymptote.
+
+# 15. Why this differs from Logistic growth
+
+A Logistic curve imposes symmetry around its inflection under a particular parameterization and a finite upper asymptote. An increasing SCAM imposes neither property unless additional constraints are specified.
+
+# 16. Why this differs from Richards growth
+
+Richards provides an asymmetric sigmoid with interpretable parametric structure. SCAM is more flexible but its coefficients are not biological asymptote and rate parameters.
+
+# 17. Basis dimension
+
+`k` controls available complexity. A very small `k` can prevent meaningful shape changes; a very large value can increase computation. Penalization controls realized smoothness, but basis adequacy still needs inspection.
+
+# 18. Residual AR1 option
+
+The wrapper exposes `rho` because `scam` supports Gaussian AR1 handling. The user must provide it.
+
+```{r eval=FALSE}
+sm_ar <- growth_smooth(
+  bean,
+  time="day",
+  response="height_cm",
+  method="scam",
+  constraint="increasing",
+  k=6,
+  rho=.3
+)
+```
+
+# 19. Why fixed rho is advanced
+
+A fixed residual correlation can materially affect uncertainty. Version 0.3.0 does not estimate `rho` automatically. Use the mixed-effects module or a direct lower-level SCAM workflow when correlation inference is central.
+
+# 20. Derivatives under a shape constraint
+
+For an increasing fit, first derivatives should be nonnegative apart from numerical tolerance. Second derivatives remain free to change sign, so the curve can accelerate and decelerate.
+
+# 21. Inflection landmarks
+
+```{r eval=FALSE}
+growth_smooth_traits(sm, n=500)
+```
+
+Multiple curvature changes are possible. A constrained smooth is not forced to have exactly one inflection.
+
+# 22. Plateau-like behavior
+
+A derivative approaching zero suggests local flattening but does not establish a biological asymptote beyond the observed support.
+
+# 23. Extrapolation
+
+Shape constraints can make extrapolation look deceptively reasonable. Do not infer a final height or biomass asymptote from a constrained smooth fitted only to early growth.
+
+# 24. Irregular data
+
+The package can fit a constrained population trajectory after reducing observations to time-specific persistent-unit means. A dense irregular sensor stream may require direct GAMM/SCAM modeling with a richer dependence structure.
+
+# 25. Stress response
+
+A water-deficit treatment may produce a temporary pause followed by recovery. The trajectory can still be nondecreasing while the derivative falls near zero and later rises. A constrained smooth can describe that rate pattern without forcing a decline in size.
+
+# 26. Defoliation response
+
+If the measured response is leaf area and defoliation physically removes tissue, monotonic increase is invalid. Event-aware methods are required. Anten and Ackerly explicitly developed growth analysis for periodic losses of leaf mass [@AntenAckerly2001].
+
+# 27. Plant height versus biomass
+
+Height may remain monotonic over a window even when total dry biomass changes through organ loss. Shape knowledge is response-specific.
+
+# 28. Root traits
+
+Root length extracted from images can decline because roots disappear from view or segmentation changes. A monotonicity constraint may model measurement behavior rather than biology.
+
+# 29. Comparison with unconstrained smooth
+
+A useful sensitivity workflow is to fit both:
+
+```{r eval=FALSE}
+u <- growth_smooth(bean, time="day", response="height_cm", method="gam", k=6)
+c <- growth_smooth(bean, time="day", response="height_cm", method="scam", constraint="increasing", k=6)
+```
+
+If the unconstrained fit is already monotone, the constraint has little practical effect. If it changes the curve substantially, inspect why.
+
+# 30. Report the constraint
+
+Do not write simply “a GAM was fitted.” State that a monotonic increasing shape-constrained additive model was used and explain the biological reason.
+
+# 31. Do not hide constraint sensitivity
+
+If conclusions about maximum growth rate or inflection time change markedly between constrained and unconstrained fits, report that sensitivity.
+
+# 32. Common error: using monotonicity to repair outliers
+
+A model constraint is not a data-cleaning substitute. Verify measurements first.
+
+# 33. Common error: monotonic full-season LAI
+
+Leaf area index often declines during senescence. An increasing constraint over the full season is invalid.
+
+# 34. Common error: interpreting the final fitted value as asymptote
+
+The final observed-support value is not a fitted carrying capacity.
+
+# 35. Common error: assuming derivative uncertainty is zero
+
+The constrained sign does not mean derivative magnitude is known precisely.
+
+# 36. Common error: forcing treatment curves to the same constraint
+
+One treatment may experience defoliation or mortality while another does not. The same constraint may not be biologically appropriate for both.
+
+# 37. Common error: selecting constraint by AIC alone
+
+The constraint should be scientifically defensible. AIC can compare models but cannot create biological knowledge.
+
+# 38. Figure recommendation
+
+Show observations, the constrained curve, and preferably the unconstrained benchmark. A derivative panel can show how the constraint changes estimated rates.
+
+# 39. Methods template
+
+> Plant height was modeled as a smooth monotone-increasing function of time using a shape-constrained additive model. The monotonicity restriction was specified a priori because the analysis window preceded lodging and senescence and individual height measurements were expected to be nondecreasing apart from measurement error. Sensitivity was assessed against an unconstrained smooth fitted to the same persistent-unit summaries.
+
+# 40. Results template
+
+> The constrained and unconstrained trajectories were similar over most of the observed period. The constraint removed a small late reversal unsupported by the raw unit trajectories. Estimated maximum growth rate and its timing were stable across the two specifications.
+
+# 41. Minimal validation script
+
+```{r eval=FALSE}
+if (requireNamespace("scam", quietly=TRUE) && requireNamespace("mgcv", quietly=TRUE)) {
+  s <- growth_smooth(bean, time="day", response="height_cm",
+                     method="scam", constraint="increasing", k=6)
+  d <- growth_derivative(s, order=1, n=200)
+  summary(d$derivative)
+  growth_smooth_traits(s)
+}
+```
+
+# 42. Decision guide
+
+Use a constrained smoother when:
+
+- the shape restriction is scientifically justified over the analyzed window;
+- a parametric asymptote is not required;
+- local rate variation matters;
+- retaining noisy observations is preferable to manual monotonic correction.
+
+Do not use it when:
+
+- real decreases are biologically possible and relevant;
+- discrete disturbances create jumps;
+- mechanistic parameters are the primary estimands;
+- the constraint is chosen only after inspecting which version looks nicer.
+
+# 43. Final perspective
+
+Shape constraints are most useful when they encode real biological knowledge while preserving nonparametric flexibility. They become harmful when used to force a desired story. Version 0.3.0 exposes them explicitly so that the constraint remains visible and reportable.
+
+# References

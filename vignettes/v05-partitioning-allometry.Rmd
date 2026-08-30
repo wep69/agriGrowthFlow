@@ -1,0 +1,130 @@
+---
+title: "Biomass Partitioning and Allometry"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Biomass Partitioning and Allometry}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(agriGrowthFlow)
+```
+
+# 1. Growth is also allocation
+
+Whole-plant biomass can change because total carbon gain changes, because allocation among organs changes, or both. Partitioning and allometry therefore complement AGR, RGR and NAR rather than replace them [@Hunt1990].
+
+# 2. Partitioning without hidden renormalization
+
+```{r}
+s <- growth_example_data("soybean_partition")
+
+g <- growth_data(
+  s,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  treatment = "cultivar",
+  block = "block",
+  total_mass = "total_mass_g",
+  leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g",
+  root_mass = "root_mass_g",
+  stem_mass = "stem_mass_g",
+  reproductive_mass = "reproductive_mass_g"
+)
+
+part <- growth_partition(g)
+head(part)
+```
+
+The default denominator is measured total mass. If supplied components sum to 96% of total mass, the package reports 4% unallocated rather than forcing the measured components to 100%.
+
+# 3. Why closure matters
+
+A compositional normalization can be useful, but it changes the question. Normalized fractions answer: "how is the measured component sum distributed?" Fractions against total mass answer: "what fraction of measured total biomass is in each component?"
+
+Use normalization only deliberately:
+
+```{r}
+part_norm <- growth_partition(g, normalize = TRUE)
+head(part_norm)
+```
+
+# 4. Partitioning through time
+
+```{r}
+out <- cbind(s[c("plot_id", "block", "cultivar", "day")], part)
+aggregate(frac_leaf_mass_g ~ cultivar + day, out, mean)
+aggregate(frac_reproductive_mass_g ~ cultivar + day, out, mean)
+```
+
+The expected ontogenetic pattern in this simulated dataset is declining leaf allocation and increasing reproductive allocation. These values are synthetic teaching data, not field evidence.
+
+# 5. Root:shoot relationships
+
+A root:shoot ratio can be computed from source masses, but ratios are asymmetric and can become unstable near zero. Allometric modelling often provides a more informative scaling description over a size range.
+
+# 6. Log-log allometry
+
+The package fits
+
+$$
+y = a x^k
+$$
+
+by
+
+$$
+\ln y = \ln a + k\ln x.
+$$
+
+```{r}
+a <- growth_allometry(
+  s,
+  x = "root_mass_g",
+  y = "stem_mass_g",
+  group = "cultivar"
+)
+a
+```
+
+# 7. Interpreting the exponent
+
+- $k=1$ indicates proportional scaling under this model.
+- $k>1$ indicates that `y` increases more than proportionally with `x`.
+- $k<1$ indicates sub-proportional scaling.
+
+These statements are conditional on the log-log model and on OLS treating `x` as the predictor. They are not universal biological laws.
+
+# 8. Confidence intervals
+
+`growth_allometry()` reports an OLS standard error and confidence interval for $k$. A confidence interval that includes 1 is not proof of isometry; it indicates that the data and model do not clearly distinguish the exponent from 1 at the selected confidence level.
+
+# 9. Important limitation: measurement error in both axes
+
+If both variables have substantial measurement error and the scientific goal is symmetric scaling rather than prediction of `y` from `x`, standardized major-axis or another errors-in-variables method may be preferable. Version 0.1.0 does not silently switch methods. A later release can add a validated SMA backend.
+
+# 10. Allometry across ontogeny
+
+Pooling all ages can create apparent scaling that partly reflects developmental stage. Consider plotting the relationship by harvest date and cultivar before fitting a single exponent.
+
+```{r fig.width=7, fig.height=4.5}
+growth_plot(g, response = "stem_mass_g", time = "root_mass_g", group = "cultivar", summary = "raw", connect = FALSE)
+```
+
+Here `growth_plot()` is used simply as an x-y scatter display by overriding the time role. For publication, label the axes with physical units explicitly.
+
+# 11. Reporting
+
+State component definitions, whether fractions were normalized, closure quality, the allometric model, transformation, regression orientation, sample size, exponent estimate with interval, and the observed size range. Avoid extrapolating the power law beyond the measured range without biological justification.
+
+# References

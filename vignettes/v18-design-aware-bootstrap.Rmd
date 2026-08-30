@@ -1,0 +1,474 @@
+---
+title: "Design-Aware Bootstrap for Plant Growth Curves"
+author: "agriGrowthFlow"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Design-Aware Bootstrap for Plant Growth Curves}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+# 1. Why bootstrap belongs in a growth-analysis workflow
+
+A fitted plant-growth curve is only one estimate of an underlying trajectory. The fitted asymptote, timing parameter, maximum growth rate, and derived times such as `t50` are uncertain because the observed plants, plots, harvests, and measurement errors represent a finite sample. Version 0.4.0 adds a dedicated resampling layer so that this uncertainty can be propagated through the entire nonlinear fitting procedure rather than approximated only from a local coefficient covariance matrix.
+
+Bootstrap methods replace an analytic sampling-distribution calculation with repeated resampling and refitting. The general framework is described comprehensively by @DavisonHinkley1997. The important point for plant experiments is that the object resampled must correspond to the stochastic structure of the experiment. A bootstrap that ignores the experimental unit can create a mathematically valid resampling exercise that answers the wrong biological question.
+
+The `agriGrowthFlow` rule remains unchanged:
+
+> Define the persistent experimental unit and sampling process before choosing a resampling unit.
+
+This vignette develops that rule in detail.
+
+# 2. What is being bootstrapped?
+
+Suppose a nonlinear curve is written as
+
+\[
+y_i = f(t_i;\boldsymbol{\theta}) + \varepsilon_i,
+\]
+
+where \(\boldsymbol{\theta}\) contains the model parameters. In a logistic model,
+
+\[
+f(t)=\frac{A}{1+\exp\{-(t-m)/s\}},
+\]
+
+and the parameter vector is
+
+\[
+\boldsymbol{\theta}=(A,m,s).
+\]
+
+The biological quantities of interest may instead be
+
+\[
+\boldsymbol{\psi} = (t_{10},t_{50},t_{90},G_{\max},AUC).
+\]
+
+A useful bootstrap should propagate uncertainty from the observed data through
+
+1. resampling;
+2. nonlinear optimization;
+3. parameter estimation;
+4. trait transformation;
+5. interval construction.
+
+`growth_boot()` performs exactly those steps for a single `agri_growth_fit`.
+
+# 3. Example data
+
+```{r example-data}
+library(agriGrowthFlow)
+
+sun <- growth_example_data("sunflower_sigmoid")
+sun1 <- subset(sun, cultivar == unique(sun$cultivar)[1])
+
+head(sun1)
+```
+
+The teaching data are simulated. They are useful for learning package behavior, not for making claims about sunflower biology.
+
+Fit a logistic curve first.
+
+```{r fit-logistic}
+fit <- growth_fit(
+  sun1,
+  model = "logistic",
+  time = "day",
+  response = "biomass_g",
+  engine = "nls"
+)
+
+coef(fit)
+growth_traits(fit)
+```
+
+The fitted coefficients are point estimates. They do not show how much these estimates would vary under repeated sampling.
+
+# 4. Case bootstrap
+
+The case bootstrap samples rows with replacement.
+
+```{r case-bootstrap}
+b_case <- growth_boot(
+  fit,
+  R = 50,
+  method = "case",
+  seed = 1001,
+  engine = "nls"
+)
+
+b_case
+head(b_case$records)
+```
+
+For a final analysis, use substantially more than 50 replicates. Small values are used in a vignette to keep rendering time manageable.
+
+Case resampling is most defensible when rows can reasonably be treated as exchangeable sampling units. It is not the default choice for longitudinal observations from the same plant or plot.
+
+## 4.1 What the object stores
+
+```{r case-object}
+str(b_case$coefficients)
+str(b_case$traits)
+table(b_case$records$success)
+```
+
+The package retains three separate layers of information:
+
+* the original estimate;
+* bootstrap replicate values;
+* a success/failure audit for every attempted refit.
+
+This matters for nonlinear models because bootstrap samples can occasionally create weakly identified parameter combinations or fail to converge.
+
+# 5. Cluster bootstrap
+
+Longitudinal plant experiments often contain several observations from the same persistent unit. If the unit is a plant, pot, or plot, its entire trajectory can be resampled as a cluster.
+
+Consider a declared destructive-sampling experiment.
+
+```{r cluster-data}
+g <- growth_data(
+  sun1,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  total_mass = "biomass_g"
+)
+
+fit_plot <- suppressWarnings(
+  growth_fit(g, "logistic", engine = "nls")
+)
+
+head(fit_plot$data)
+table(fit_plot$data$.unit)
+```
+
+The destructive subsamples have already been aggregated to persistent plot by time before the curve is fitted. The bootstrap should now resample persistent plots, not recreate independence among harvested plants.
+
+```{r cluster-bootstrap}
+b_cluster <- growth_boot(
+  fit_plot,
+  R = 50,
+  method = "cluster",
+  seed = 1002,
+  engine = "nls"
+)
+
+b_cluster
+```
+
+`method = "auto"` chooses cluster resampling when the fitted data retain multiple observations from more than one persistent unit.
+
+```{r auto-bootstrap}
+b_auto <- growth_boot(
+  fit_plot,
+  R = 25,
+  method = "auto",
+  seed = 1003,
+  engine = "nls"
+)
+
+b_auto$method
+```
+
+# 6. Why cluster bootstrap is different
+
+Imagine four plots, each measured at six times. A row-wise bootstrap can independently select day 10 from plot 1, day 20 from plot 4, and day 30 from plot 2. That construction destroys the original within-plot trajectory.
+
+A cluster bootstrap instead samples plot labels:
+
+\[
+(1,2,3,4) \rightarrow (2,2,4,1),
+\]
+
+then includes all observed times from every selected plot. Plot 2 appears twice as two bootstrap clusters. Its internal trajectory remains intact.
+
+This does not automatically solve every dependence problem. It does, however, preserve the sampling unit more faithfully than row-wise resampling when whole units are the independent replicates.
+
+# 7. Residual bootstrap
+
+Residual bootstrap conditions on the fitted curve and resamples centered residuals.
+
+```{r residual-bootstrap}
+b_resid <- growth_boot(
+  fit,
+  R = 50,
+  method = "residual",
+  seed = 1004,
+  engine = "nls"
+)
+
+b_resid
+```
+
+Conceptually,
+
+\[
+y_i^*=\hat y_i+e_i^*,
+\]
+
+where \(e_i^*\) is sampled from the centered fitted residuals.
+
+This method is attractive when the model form is trusted and residuals are approximately exchangeable. It is less attractive when residual variance changes strongly over time or when serial correlation remains.
+
+# 8. Parametric bootstrap
+
+Parametric bootstrap simulates from the fitted error model.
+
+```{r parametric-bootstrap}
+b_par <- growth_boot(
+  fit,
+  R = 50,
+  method = "parametric",
+  seed = 1005,
+  engine = "nls"
+)
+```
+
+For the current Gaussian nonlinear least-squares layer,
+
+\[
+y_i^*=\hat y_i+\varepsilon_i^*,
+\qquad
+\varepsilon_i^*\sim N(0,\hat\sigma^2).
+\]
+
+This is model-based uncertainty. If the Gaussian error model is poor, the bootstrap reproduces that poor model many times.
+
+# 9. Wild bootstrap
+
+When residual spread changes with fitted value or time, resampling raw residuals can be questionable. A wild bootstrap keeps the residual magnitude associated with each observation and perturbs its sign or multiplier.
+
+`agriGrowthFlow` supports Rademacher and Mammen multipliers. Mammen's work gives important theoretical background for wild-bootstrap behavior in regression settings [@Mammen1992].
+
+```{r wild-bootstrap}
+b_wild <- growth_boot(
+  fit,
+  R = 50,
+  method = "wild",
+  wild_weights = "mammen",
+  seed = 1006,
+  engine = "nls"
+)
+
+b_wild$wild_weights
+```
+
+For Rademacher weights,
+
+\[
+w_i\in\{-1,+1\},
+\]
+
+with equal probability and
+
+\[
+y_i^*=\hat y_i+e_iw_i.
+\]
+
+The method preserves the local residual magnitude but does not preserve serial dependence by itself.
+
+# 10. Cluster-wild bootstrap
+
+A cluster-wild scheme uses one multiplier for each persistent unit. All residuals belonging to a selected unit receive the same multiplier.
+
+```{r cluster-wild}
+b_cw <- growth_boot(
+  fit_plot,
+  R = 50,
+  method = "cluster_wild",
+  seed = 1007,
+  engine = "nls"
+)
+```
+
+This preserves a unit-level perturbation pattern while retaining the fitted design. It can be useful as a sensitivity analysis when heterogeneity and clustering coexist. It should not be described as a universal correction for all repeated-measures problems.
+
+# 11. Confidence intervals for coefficients
+
+```{r coefficient-ci}
+growth_boot_ci(
+  b_case,
+  source = "coefficients"
+)
+```
+
+Three interval constructions are available.
+
+## 11.1 Percentile interval
+
+If \(\theta^*_{(\alpha/2)}\) and \(\theta^*_{(1-\alpha/2)}\) are empirical bootstrap quantiles, the percentile interval is simply
+
+\[
+[\theta^*_{(\alpha/2)},\theta^*_{(1-\alpha/2)}].
+\]
+
+```{r percentile-ci}
+growth_boot_ci(
+  b_case,
+  source = "coefficients",
+  parm = "mid",
+  type = "percentile"
+)
+```
+
+## 11.2 Basic interval
+
+The basic interval reflects bootstrap deviation around the original estimate:
+
+\[
+[2\hat\theta-\theta^*_{(1-\alpha/2)},
+ 2\hat\theta-\theta^*_{(\alpha/2)}].
+\]
+
+```{r basic-ci}
+growth_boot_ci(
+  b_case,
+  source = "coefficients",
+  parm = "mid",
+  type = "basic"
+)
+```
+
+## 11.3 Normal approximation
+
+The normal interval uses the empirical bootstrap standard deviation:
+
+\[
+\hat\theta\pm z_{1-\alpha/2}\widehat{SE}_{boot}.
+\]
+
+```{r normal-ci}
+growth_boot_ci(
+  b_case,
+  source = "coefficients",
+  parm = "mid",
+  type = "normal"
+)
+```
+
+No interval type is automatically best in every nonlinear problem. Compare behavior, inspect skewness, and report the chosen construction.
+
+# 12. Biological traits are often the real target
+
+A major reason to bootstrap a growth model is to obtain uncertainty for transformed quantities.
+
+```{r trait-ci}
+growth_boot_traits(
+  b_case,
+  traits = c("t10", "t50", "t90", "maximum_absolute_rate")
+)
+```
+
+These quantities are nonlinear functions of fitted coefficients. Their uncertainty can be asymmetric even when individual coefficient standard errors look approximately symmetric.
+
+For a logistic model,
+
+\[
+G_{\max}=\frac{A}{4s},
+\]
+
+so uncertainty in both \(A\) and \(s\), including their dependence, contributes to uncertainty in \(G_{\max}\). Refitting every bootstrap sample propagates that joint variation naturally.
+
+# 13. Refitting failures are data
+
+Never delete failed bootstrap replicates silently.
+
+```{r failures}
+subset(b_case$records, !success)
+b_case$success_rate
+```
+
+A high failure rate can indicate
+
+* a weak model for the available time range;
+* poor identifiability;
+* insufficient observations near the asymptote;
+* inappropriate starting values;
+* influential sampling units;
+* a model that is only barely supported by the original sample.
+
+The package warns when fewer than 80 percent of bootstrap refits succeed.
+
+# 14. Choosing a method from the design
+
+A practical decision table is:
+
+| Data structure | Candidate resampling | Main caution |
+|---|---|---|
+| Independent experimental units, one row each | case | rows must represent the sampling units |
+| repeated observations within plant/plot | cluster | enough independent units are still required |
+| trusted curve with exchangeable residuals | residual | serial and heteroscedastic patterns are not preserved |
+| trusted Gaussian error model | parametric | conclusions inherit the error-model assumptions |
+| heteroscedastic residual magnitude | wild | row-wise serial dependence remains unmodeled |
+| clustered observations with heterogeneous residual scale | cluster-wild | cluster-level multiplier is a sensitivity device, not a full covariance model |
+
+# 15. Bootstrap is not a substitute for the longitudinal model
+
+Suppose measurements from each plant follow an AR(1) process. A cluster bootstrap preserves each observed plant trajectory, but the fitted ordinary NLS model still does not explicitly estimate AR(1) correlation. The bootstrap and the statistical model solve different parts of the inferential problem.
+
+A useful workflow can therefore be
+
+1. use `growth_mixed()` when the scientific question is a treatment comparison under repeated measurements;
+2. use flexible or parametric curves for biological description;
+3. use bootstrap to assess sensitivity of derived nonlinear quantities;
+4. compare conclusions across compatible inferential layers.
+
+# 16. Reproducibility
+
+Always set a seed in a published bootstrap analysis.
+
+```{r reproducibility}
+b1 <- growth_boot(fit, R = 25, seed = 4001, engine = "nls")
+b2 <- growth_boot(fit, R = 25, seed = 4001, engine = "nls")
+
+identical(b1$coefficients, b2$coefficients)
+```
+
+Also report
+
+* bootstrap method;
+* number of requested replicates;
+* number and percentage of successful refits;
+* nonlinear fitting engine;
+* number of starts per refit;
+* interval construction;
+* resampling unit.
+
+# 17. Suggested Methods wording
+
+A concise methods statement can be built around the actual design:
+
+> Uncertainty in nonlinear growth parameters and derived trajectory traits was quantified by bootstrap resampling of the persistent experimental unit. Entire plot trajectories were sampled with replacement, the candidate nonlinear model was refitted to each bootstrap sample, and percentile 95% intervals were obtained from successful replicates. Failed refits were retained in the computational audit and the successful-refit proportion was reported.
+
+Change that wording if your resampling unit or interval method differs.
+
+# 18. What not to do
+
+Do not:
+
+* resample destructive subsamples as if they were independent longitudinal plants;
+* choose row-wise case bootstrap only because it is easy to code;
+* hide failed refits;
+* use 20 bootstrap replicates for a final paper;
+* interpret a narrow interval as proof that the model form is correct;
+* call a residual bootstrap dependence-preserving when serial structure was not resampled;
+* compare bootstrap distributions generated from different scientific estimands without saying so.
+
+# 19. Recommended final-analysis scale
+
+The appropriate number of replicates depends on the purpose. For teaching, 20 to 100 may be enough to demonstrate behavior. For final confidence intervals, 1000 or more is a more defensible starting point, and stability should be checked. @DavisonHinkley1997 provide detailed discussion of bootstrap accuracy and confidence intervals.
+
+# 20. Summary
+
+Version 0.4.0 treats resampling as part of the experimental design rather than a generic option appended to a curve fit. `growth_boot()` preserves the requested sampling unit, `growth_boot_ci()` exposes interval assumptions, and `growth_boot_traits()` carries uncertainty into biologically interpretable quantities.
+
+The next vignette extends this idea from uncertainty in one fitted curve to uncertainty in the choice among competing curve families.

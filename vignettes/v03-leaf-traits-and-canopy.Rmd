@@ -1,0 +1,132 @@
+---
+title: "Leaf Traits and Canopy Foundations: LAR, SLA, LMR, and LAI"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Leaf Traits and Canopy Foundations: LAR, SLA, LMR, and LAI}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(agriGrowthFlow)
+```
+
+# 1. Morphological decomposition of growth
+
+Leaf area ratio, specific leaf area and leaf mass ratio separate two different biological dimensions: how much biomass is allocated to leaves and how much leaf area is deployed per unit leaf mass [@Hunt1990].
+
+# 2. Definitions
+
+$$
+LAR = \frac{A}{W},
+$$
+
+where $A$ is leaf area and $W$ is total plant dry mass.
+
+$$
+SLA = \frac{A}{W_L},
+$$
+
+where $W_L$ is leaf dry mass.
+
+$$
+LMR = \frac{W_L}{W}.
+$$
+
+Therefore,
+
+$$
+LAR = SLA \times LMR.
+$$
+
+```{r}
+A <- 0.12
+W <- 10
+WL <- 3
+c(
+  LAR = growth_lar(A, W),
+  SLA = growth_sla(A, WL),
+  LMR = growth_lmr(WL, W),
+  reconstructed_LAR = growth_sla(A, WL) * growth_lmr(WL, W)
+)
+```
+
+# 3. Biological interpretation
+
+A treatment can increase LAR by increasing SLA, LMR, or both. Those mechanisms are not equivalent.
+
+- Higher SLA means more area per unit leaf mass, often associated with thinner or less dense leaves.
+- Higher LMR means a larger fraction of total dry mass is invested in leaves.
+- LAR combines these effects and connects morphology with whole-plant growth.
+
+The identities are descriptive. They do not prove causal pathways.
+
+# 4. Leaf area index
+
+For a crop stand,
+
+$$
+LAI = \frac{A_L}{A_G},
+$$
+
+where $A_L$ is leaf area and $A_G$ is ground area.
+
+```{r}
+growth_lai(leaf_area = 1.2, ground_area = 0.25)
+```
+
+LAI is dimensionless when both areas use the same area unit.
+
+# 5. Do not mix plant and land bases silently
+
+A frequent mistake is to use leaf area per plant in the numerator and plot ground area in the denominator without multiplying by plant density or otherwise defining the represented ground area. `growth_lai()` cannot infer that missing design information. The user must supply compatible quantities.
+
+# 6. Explore the maize teaching data
+
+```{r}
+d <- growth_example_data("maize_destructive")
+g <- growth_data(
+  d, time = "day", sampling = "destructive",
+  experimental_unit = "plot_id", treatment = "nitrogen", block = "block",
+  total_mass = "total_mass_g", leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g", ground_area = "ground_area_m2"
+)
+idx <- growth_indices(g)
+head(idx$intervals[c("nitrogen", "t1", "LAR1", "SLA1", "LMR1", "LAI1")])
+```
+
+# 7. Verify the decomposition numerically
+
+```{r}
+z <- idx$intervals
+check <- z$LAR1 - z$SLA1 * z$LMR1
+summary(check)
+```
+
+Any large discrepancy would indicate inconsistent source measurements or an implementation problem. Floating-point rounding should produce only tiny numerical differences when all quantities come from the same measurements.
+
+# 8. Time matters
+
+SLA and LMR can change with ontogeny. Comparing treatment means pooled across all harvests can conflate treatment effects with developmental timing. Plot or tabulate these ratios against time before collapsing them.
+
+```{r}
+aggregate(SLA1 ~ nitrogen + t1, idx$intervals, mean)
+aggregate(LMR1 ~ nitrogen + t1, idx$intervals, mean)
+```
+
+# 9. Missing leaves or senescence
+
+Late-season decreases in leaf area are real biological information. Do not enforce monotonic LAI or LAR in the foundational workflow. Later curve models may use shape constraints only when scientifically justified.
+
+# 10. Reporting template
+
+A useful report states the exact leaf-area definition, whether petioles are included in leaf mass, whether areas are one-sided or projected, whether biomass is dry mass, and whether the ratios are plant-based or stand-based.
+
+# References

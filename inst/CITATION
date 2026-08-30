@@ -1,0 +1,10 @@
+bibentry(
+  bibtype = "Manual",
+  title = "agriGrowthFlow: Design-Aware Plant Growth and Longitudinal Trajectory Analysis",
+  author = c(
+    person("Walter Esfrain", "Pereira"),
+    person("Magali Haidee", "Pereira Martinez")
+  ),
+  year = "2026",
+  note = "R package version 1.0.0"
+)

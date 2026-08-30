@@ -1,0 +1,439 @@
+---
+title: "Bootstrap Growth Traits and Model-Selection Stability"
+author: "agriGrowthFlow"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Bootstrap Growth Traits and Model-Selection Stability}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+# 1. Purpose
+
+Version 0.4.0 treats uncertainty as part of the biological interpretation rather than as an optional table added after curve fitting. This vignette extends the design-aware bootstrap introduced in `v18-design-aware-bootstrap.Rmd` and focuses on two questions that arise repeatedly in plant-growth studies:
+
+1. How uncertain are derived biological quantities such as `t50`, `t90`, the maximum absolute growth rate, and area under the observed growth curve?
+2. How stable is the choice of a parametric growth family when the observed experimental units are resampled?
+
+These are different questions. Parameter and trait uncertainty is conditional on a fitted model family. Model-selection stability asks how often the preferred family changes when the sample changes. Both can matter when an agronomic conclusion depends on a particular curve shape.
+
+The bootstrap framework follows the general principles in @DavisonHinkley1997. Wild-bootstrap options use symmetric or Mammen-type multipliers, with the latter motivated by the asymptotic treatment developed by @Mammen1992.
+
+# 2. Why coefficient uncertainty is not enough
+
+For a logistic trajectory,
+
+\[
+W(t)=\frac{A}{1+\exp[-(t-m)/s]},
+\]
+
+one could report uncertainty for \(A\), \(m\), and \(s\). However, agronomic questions are often stated in another parameterization:
+
+- When does the plant reach 50% of its fitted asymptote?
+- How long is the transition from 10% to 90% of the fitted asymptote?
+- What is the maximum absolute growth rate?
+- What is the integrated fitted biomass over the observed interval?
+
+For the logistic model,
+
+\[
+t_{50}=m,
+\]
+
+but that identity does not hold across all model families. Even when a trait is an analytic transformation of the coefficients, its sampling distribution can be asymmetric. The bootstrap therefore refits the curve and recomputes the trait in every successful replicate.
+
+# 3. A reproducible example
+
+The bundled sunflower data are simulated teaching data. We select one cultivar so that this vignette concerns one curve rather than a pooled treatment comparison.
+
+```{r data}
+sun <- growth_example_data("sunflower_sigmoid")
+sun1 <- subset(sun, cultivar == unique(sun$cultivar)[1])
+
+fit <- growth_fit(
+  sun1,
+  model = "logistic",
+  time = "day",
+  response = "biomass_g",
+  engine = "nls"
+)
+
+fit
+```
+
+The original fitted values are the center of the bootstrap analysis. They should not be interpreted without checking convergence, residual patterns, the time support of the data, and biological plausibility.
+
+# 4. Build the bootstrap object once
+
+For a real analysis, `R = 999`, `1999`, or a larger value is more defensible than the small value used here for vignette speed. The examples below intentionally use a modest number of replicates.
+
+```{r boot}
+b <- growth_boot(
+  fit,
+  R = 40,
+  method = "case",
+  seed = 2401,
+  engine = "nls"
+)
+
+b
+head(b$records)
+```
+
+The object stores:
+
+- the original fit;
+- the resampling method;
+- coefficient draws;
+- derived-trait draws;
+- a success/failure record for every requested replicate;
+- optional fitted objects if `keep_fits = TRUE`.
+
+This audit trail matters in nonlinear regression because failed refits are scientifically informative. If a large fraction of resampled datasets cannot support the selected curve, narrow intervals calculated from the successful subset can be misleading.
+
+# 5. Inspect the refitting success rate
+
+```{r success}
+mean(b$records$success)
+subset(b$records, !success)
+```
+
+`growth_boot()` warns when fewer than 80% of requested replicates converge. The 80% value is a package warning threshold, not a universal statistical law. A user should investigate why failures occur rather than suppress the warning automatically.
+
+Potential causes include:
+
+- an over-flexible curve relative to the number of time points;
+- poor starting values in some resamples;
+- weak information near the asymptote;
+- a model whose shape is incompatible with some resampled datasets;
+- isolated observations that dominate the nonlinear fit.
+
+# 6. Confidence intervals for coefficients
+
+```{r coef-ci}
+growth_boot_ci(
+  b,
+  source = "coefficients",
+  conf = 0.95,
+  type = "percentile"
+)
+```
+
+The percentile interval uses the empirical quantiles of successful bootstrap estimates. It is easy to interpret and invariant under monotone transformations, but it is not automatically the best interval for every problem.
+
+The package also provides the basic interval:
+
+```{r basic-ci}
+growth_boot_ci(
+  b,
+  source = "coefficients",
+  type = "basic"
+)
+```
+
+and a normal approximation based on the bootstrap standard error:
+
+```{r normal-ci}
+growth_boot_ci(
+  b,
+  source = "coefficients",
+  type = "normal"
+)
+```
+
+Version 0.4.0 deliberately does not label one of these interval types as universally optimal. The shape of the bootstrap distribution, boundary behavior, available sample size, and the scientific use of the interval all matter.
+
+# 7. Derived-trait uncertainty
+
+The same bootstrap object already contains the traits recalculated for every successful refit.
+
+```{r trait-table}
+head(b$traits)
+```
+
+A targeted summary is obtained with `growth_boot_traits()`:
+
+```{r trait-ci}
+growth_boot_traits(
+  b,
+  traits = c("t10", "t50", "t90", "maximum_absolute_rate"),
+  conf = 0.95,
+  type = "percentile"
+)
+```
+
+A useful reporting strategy is to make biological traits the primary results and model coefficients supporting results. For example, instead of writing only that the timing coefficient was 31.4, a manuscript can report the fitted time to 50% of the asymptote together with its interval and units.
+
+# 8. Duration of the rapid-growth transition
+
+The package returns `t10` and `t90` separately. Their difference can be calculated in each replicate to propagate their joint uncertainty rather than subtracting two marginal confidence limits.
+
+```{r transition}
+ok <- b$records$success
+transition <- b$traits$t90[ok] - b$traits$t10[ok]
+quantile(transition, c(0.025, 0.5, 0.975), na.rm = TRUE)
+```
+
+This is an important general rule:
+
+> If the scientific estimand is a function of two or more fitted traits, calculate that function within every resample before summarizing uncertainty.
+
+Subtracting independent-looking confidence limits ignores covariance among the traits.
+
+# 9. Maximum absolute growth rate
+
+For many sigmoidal models, the maximum slope is a more transferable biological quantity than the model-specific scale coefficient.
+
+```{r max-rate}
+growth_boot_traits(
+  b,
+  traits = "maximum_absolute_rate"
+)
+```
+
+The units are response units per time unit. If biomass is measured in g plant^-1 and time in days, the maximum absolute rate is interpreted in g plant^-1 day^-1.
+
+It should not be confused with relative growth rate, which has units of mass per mass per time and is treated in the Foundations layer.
+
+# 10. AUC uncertainty
+
+`growth_traits()` and the bootstrap trait matrix include the area under the fitted curve over the observed support. This is not an extrapolated lifetime integral.
+
+```{r auc}
+growth_boot_traits(
+  b,
+  traits = "auc_observed_support"
+)
+```
+
+The explicit phrase `observed_support` is intentional. An AUC integrated far before the first observation or far beyond the final harvest would depend strongly on the chosen functional form and should be justified separately.
+
+# 11. Wild bootstrap for heteroskedastic errors
+
+Residual resampling assumes exchangeability of the residuals. When residual spread changes systematically with fitted size, a wild bootstrap can be preferable because it perturbs residual contributions without directly shuffling their magnitudes across the fitted range.
+
+```{r wild}
+bw <- growth_boot(
+  fit,
+  R = 40,
+  method = "wild",
+  wild_weights = "mammen",
+  seed = 2402,
+  engine = "nls"
+)
+
+growth_boot_traits(bw, traits = c("t50", "maximum_absolute_rate"))
+```
+
+The Mammen multipliers are asymmetric two-point weights with moments designed for heteroskedastic regression resampling [@Mammen1992]. The Rademacher option uses equal probabilities for -1 and +1.
+
+Neither option repairs a misspecified mean trajectory. A bootstrap can reproduce uncertainty around a biased model very efficiently.
+
+# 12. Cluster bootstrap for repeated trajectories
+
+If a curve is fitted to observations that arise in complete persistent-unit trajectories, row-wise case resampling breaks the experimental dependence. The cluster bootstrap resamples whole units.
+
+The destructive maize dataset has subobservations nested within plots and dates. We first declare the design so the persistent plot is explicit.
+
+```{r cluster-data}
+maize <- growth_example_data("maize_destructive")
+gm <- growth_data(
+  maize,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  treatment = "nitrogen",
+  total_mass = "total_mass_g"
+)
+```
+
+For one treatment, fit a plot-aware curve and then resample the persistent units.
+
+```{r cluster, eval=FALSE}
+one_n <- subset(gm, nitrogen == unique(nitrogen)[1])
+fit_cluster <- growth_fit(
+  one_n,
+  model = "logistic",
+  response = "total_mass_g",
+  aggregate = "mean"
+)
+
+bc <- growth_boot(
+  fit_cluster,
+  R = 999,
+  method = "cluster",
+  seed = 2403
+)
+```
+
+A cluster bootstrap retains the within-plot sequence as a block. It does not, by itself, fit the serial covariance structure. When the scientific model explicitly targets repeated-unit dependence, the 0.3.0 mixed-effects layer can be more appropriate.
+
+# 13. Model-selection stability is a separate analysis
+
+A common workflow fits Logistic, Gompertz, and Richards models once and declares the model with the smallest AICc to be the winner. That calculation answers which candidate is preferred in the observed sample. It does not reveal how sensitive that selection is to sampling variation.
+
+`growth_selection_stability()` repeats the complete candidate comparison in resampled data.
+
+```{r select}
+sel <- growth_selection_stability(
+  sun1,
+  models = c("logistic", "gompertz", "richards"),
+  time = "day",
+  response = "biomass_g",
+  R = 40,
+  method = "case",
+  n_start = 2,
+  seed = 2501,
+  engine = "nls"
+)
+
+sel
+sel$frequencies
+```
+
+The function uses AICc when it is finite for all successfully fitted candidates in a replicate, otherwise AIC. All candidate models in a given replicate receive exactly the same resampled observations.
+
+# 14. Interpreting selection frequency
+
+Suppose the output were approximately:
+
+| model | selection frequency |
+|---|---:|
+| Logistic | 0.52 |
+| Gompertz | 0.38 |
+| Richards | 0.10 |
+
+This would not mean that there is a 52% posterior probability that the Logistic model is true. Bootstrap selection frequency is not a Bayesian model probability. It indicates how often a candidate wins the specified selection rule under repeated resampling from the empirical sample structure.
+
+A frequency near 1 suggests stable selection under that resampling scheme. Similar frequencies across candidates indicate that the available data do not decisively distinguish their empirical performance.
+
+# 15. Why residual bootstrap is not used for selection stability
+
+`growth_selection_stability()` intentionally permits only case or cluster resampling. A residual or parametric bootstrap would have to generate data from one privileged candidate model. That would make the apparent selection stability depend directly on which candidate was chosen as the data-generating truth.
+
+For candidate-form sensitivity, resampling the observed cases or experimental units is more neutral.
+
+# 16. Compare trait stability across candidate models
+
+Model-selection uncertainty can be scientifically mild even when the winning curve is unstable. This occurs when different candidate models yield similar estimates of the trait that matters.
+
+```{r candidate-traits}
+mods <- c("logistic", "gompertz", "richards")
+fits <- lapply(mods, function(m) {
+  growth_fit(
+    sun1,
+    model = m,
+    time = "day",
+    response = "biomass_g",
+    n_start = 2,
+    engine = "nls"
+  )
+})
+
+trait_tables <- lapply(fits, growth_traits)
+trait_tables
+```
+
+A useful interpretation distinguishes:
+
+- uncertainty within one model family;
+- instability in the selected model family;
+- practical sensitivity of the biological estimand across plausible families.
+
+# 17. Resampling method decision table
+
+| Scientific structure | Candidate bootstrap | Main rationale |
+|---|---|---|
+| independent observations | case | resample observational units |
+| complete repeated trajectories | cluster | preserve unit-level dependence |
+| fixed design, exchangeable errors | residual | retain fitted design points |
+| fitted Gaussian error model | parametric | simulate from fitted residual variance |
+| heteroskedastic independent errors | wild | preserve residual magnitude structure |
+| clustered trajectories with heterogeneous errors | cluster-wild | apply one multiplier per persistent unit |
+
+`auto` chooses cluster resampling when the fitted prepared data contain repeated persistent units and case resampling otherwise. Automatic choice is a convenience, not a replacement for study-design reasoning.
+
+# 18. Number of bootstrap replicates
+
+There is no single replicate count that is optimal for every estimand. The package requires at least 20 so that accidental toy requests are discouraged, but scientific work usually needs far more.
+
+A practical workflow is:
+
+1. use a small run to debug the refitting process;
+2. inspect the failure rate;
+3. increase multistart effort if justified;
+4. run a larger bootstrap with a fixed seed;
+5. verify that the reported quantiles are numerically stable to an additional run or larger `R`.
+
+# 19. Reproducibility
+
+Always retain the seed, model specification, resampling method, number of requested replicates, number of successful replicates, and any multistart settings.
+
+```{r audit}
+list(
+  method = b$method,
+  R = b$R,
+  seed = b$seed,
+  success_rate = b$success_rate,
+  model = b$model
+)
+```
+
+A reproducible result should also retain the source package version and the exact data-cleaning decisions made before fitting.
+
+# 20. What not to do
+
+Do not:
+
+- bootstrap rows independently when the true stochastic unit is a whole plant or plot trajectory;
+- present a narrow trait interval without checking failed nonlinear refits;
+- select the resampling scheme because it gives the smallest interval;
+- interpret bootstrap selection frequencies as posterior model probabilities;
+- use a residual bootstrap when residuals show unexplained serial correlation;
+- extend AUC conclusions beyond the observed support without an explicit extrapolation argument;
+- use a bootstrap to compensate for a biologically inappropriate mean function.
+
+# 21. Methods-language template
+
+A concise methods description can be structured as follows:
+
+> Growth-curve uncertainty was evaluated by resampling the experimental unit, refitting the complete nonlinear model in every replicate, and recalculating biologically derived traits. Percentile bootstrap intervals were based on the empirical distribution of successful refits. Candidate-form stability was examined by refitting all candidate growth families to each common resampled dataset and recording the model with the lowest finite AICc, or AIC when AICc was undefined.
+
+The actual manuscript should state the specific resampling unit, number of replicates, software version, seed policy, candidate models, fitting engine, and failure rate.
+
+# 22. Results-language template
+
+A result can distinguish model fit from biological uncertainty:
+
+> The fitted logistic trajectory placed the 50% growth time at the estimated midpoint. Bootstrap refitting propagated sampling uncertainty to this timing trait and to the maximum absolute growth rate. The selection-stability analysis showed whether the logistic form remained preferred when the experimental sample was resampled.
+
+Insert numerical results only after running the final analysis. Do not copy illustrative values from tutorials.
+
+# 23. Relationship to Bayesian uncertainty
+
+Bootstrap and Bayesian inference are not interchangeable labels for the same procedure. Bootstrap inference repeatedly perturbs the data according to a resampling scheme. Bayesian inference combines a likelihood with priors and summarizes the resulting posterior distribution.
+
+Version 0.4.0 supports both so that the user can choose an inferential framework appropriate to the scientific question and design. The next vignettes develop the Bayesian layer in detail.
+
+# 24. Summary
+
+The main lessons are:
+
+1. resample the stochastic unit, not merely the rows available in a spreadsheet;
+2. propagate uncertainty to the biological trait itself;
+3. retain failed nonlinear refits as part of the audit trail;
+4. distinguish conditional trait uncertainty from uncertainty about curve family;
+5. evaluate whether model-family instability actually changes the biological conclusion;
+6. report enough information to reproduce the complete resampling analysis.
+
+# References

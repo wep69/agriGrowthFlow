@@ -1,0 +1,327 @@
+---
+title: "Parametric Plant-Growth Model Library"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Parametric Plant-Growth Model Library}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+# Purpose
+
+Version 0.2.0 adds a deliberately small but useful library of parametric plant-growth equations. The objective is not to fit every published curve. The objective is to provide interpretable candidates that cover common shapes while keeping model choice biologically defensible.
+
+The package follows three rules.
+
+1. The experimental unit and sampling process are declared before the curve.
+2. Candidate equations are compared only on identical prepared observations.
+3. A more flexible equation is not preferred merely because it has more parameters.
+
+These principles are consistent with design-aware growth-curve analysis [@KeulsGarretsen1982] and agricultural nonlinear-modeling practice [@ArchontoulisMiguez2015].
+
+# Inspect the registry
+
+```{r}
+growth_models()
+```
+
+The registry reports the public parameter names, whether a finite upper level exists, whether the model has a determinate end, and the principal reference key used in package documentation.
+
+```{r}
+subset(growth_models(), finite_upper_level)
+```
+
+```{r}
+subset(growth_models(), determinate_end)
+```
+
+# Logistic growth
+
+The implemented logistic equation is
+
+\[
+W(t)=\frac{A}{1+\exp[-(t-t_m)/s]}.
+\]
+
+The public parameters are:
+
+- `asym`: upper asymptote \(A\);
+- `mid`: inflection time and t50;
+- `scale`: time-scale parameter \(s>0\).
+
+At the inflection point,
+
+\[
+W(t_m)=A/2.
+\]
+
+The maximum absolute rate is
+
+\[
+G_{\max}=A/(4s).
+\]
+
+This direct interpretation makes logistic growth attractive when the observed trajectory is approximately symmetric around the inflection region.
+
+```{r}
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+f_log <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+coef(f_log)
+growth_traits(f_log)
+```
+
+# Gompertz growth
+
+The implemented Gompertz equation is
+
+\[
+W(t)=A\exp\{-\exp[-(t-t_m)/s]\}.
+\]
+
+At `mid`, the response equals
+
+\[
+A/e,
+\]
+
+not \(A/2\). Consequently, coefficients called `mid` in different model families must not be interpreted as identical response levels.
+
+```{r}
+f_gom <- growth_fit(d1, "gompertz", time = "day", response = "biomass_g")
+coef(f_gom)
+growth_inflection(f_gom)
+```
+
+A common mistake is to compare logistic and Gompertz `mid` coefficients directly without recognizing that the fitted curve reaches a different fraction of its asymptote at the inflection point.
+
+# Richards growth
+
+Richards growth introduces a shape parameter [@Richards1959]:
+
+\[
+W(t)=A\{1+\nu\exp[-(t-t_m)/s]\}^{-1/\nu}.
+\]
+
+The package uses `shape` for \(\nu\). When `shape = 1`, the equation reduces to the package logistic parameterization.
+
+```{r eval=FALSE}
+f_rich <- growth_multistart(
+  d1,
+  "richards",
+  time = "day",
+  response = "biomass_g",
+  n_start = 40,
+  seed = 17
+)
+coef(f_rich)
+growth_diagnose(f_rich)
+```
+
+Richards flexibility can be scientifically valuable, but `shape`, `scale`, and `asym` can trade off strongly when late observations are sparse. More starts and diagnostics are therefore more important than with a simple logistic fit.
+
+# Chapman-Richards growth
+
+The implemented Chapman-Richards equation is
+
+\[
+W(t)=A\{1-\exp[-k(t-t_0)]\}^{m},\quad t>t_0,
+\]
+
+with zero response at and before `origin = t0` under the package implementation.
+
+Parameters:
+
+- `asym`: upper level;
+- `rate`: rate constant \(k\);
+- `shape`: exponent \(m\);
+- `origin`: model time origin \(t_0\).
+
+For `shape > 1`, the interior inflection time is
+
+\[
+t_{\mathrm{inf}}=t_0+\frac{\log(m)}{k}.
+\]
+
+`origin` is a model parameter, not automatically the date of sowing or emergence. Its biological meaning depends on the time variable supplied to the fit.
+
+# Weibull cumulative growth
+
+The cumulative Weibull form is
+
+\[
+W(t)=A\left[1-\exp\left\{-\left(\frac{t-t_0}{s}\right)^m\right\}\right],\quad t>t_0.
+\]
+
+It is useful when a flexible asymptotic transition is needed. An interior inflection occurs when `shape > 1`.
+
+The package constrains `scale` and `shape` to positive values and uses a finite range for `origin` during bounded optimization.
+
+```{r eval=FALSE}
+f_wei <- growth_multistart(
+  d1,
+  "weibull",
+  time = "day",
+  response = "biomass_g",
+  n_start = 30,
+  seed = 22
+)
+growth_traits(f_wei)
+```
+
+# von Bertalanffy cubic growth
+
+The implemented form is
+
+\[
+W(t)=A\{1-\exp[-k(t-t_0)]\}^3,
+\]
+
+which can be viewed as a constrained Chapman-Richards model with exponent 3.
+
+The reduced parameter count can be useful when the general Chapman-Richards shape is weakly identified.
+
+```{r eval=FALSE}
+f_vb <- growth_fit(d1, "von_bertalanffy", time = "day", response = "biomass_g")
+coef(f_vb)
+growth_inflection(f_vb)
+```
+
+# Beta growth for determinate trajectories
+
+Yin et al. developed a flexible sigmoid equation for determinate growth [@YinEtAl2003]. The public parameters in `agriGrowthFlow` are:
+
+- `wmax`: final size;
+- `tm`: time of maximum absolute growth rate;
+- `te`: end of growth.
+
+The implementation uses the exponent corrected in the published erratum [@YinEtAl2003Erratum]. For \(0<t<t_e\),
+
+\[
+W(t)=W_{\max}
+\left[1+\frac{t_e-t}{t_e-t_m}\right]
+\left(\frac{t}{t_e}\right)^{t_e/(t_e-t_m)}.
+\]
+
+The boundary conditions are
+
+\[
+W(0)=0,\qquad W(t_e)=W_{\max}.
+\]
+
+The optimizer internally uses `gap = te - tm` so that `te > tm` is structurally enforced. The public coefficient method returns `wmax`, `tm`, and `te`.
+
+The time origin matters strongly. Calendar day should normally be converted to a biologically meaningful elapsed time before fitting this model.
+
+```{r eval=FALSE}
+f_beta <- growth_multistart(
+  d1,
+  "beta_growth",
+  time = "day",
+  response = "biomass_g",
+  n_start = 50,
+  seed = 99
+)
+coef(f_beta)
+growth_traits(f_beta)
+```
+
+# Expolinear crop growth
+
+Goudriaan and Monteith proposed the expolinear function to connect early exponential growth with a later approximately linear crop-growth regime [@GoudriaanMonteith1990]. The implemented equation is
+
+\[
+W(t)=\frac{C_m}{R_m}\log\left[1+\exp\{R_m(t-t_b)\}\right].
+\]
+
+Parameters:
+
+- `cm`: asymptotic maximum absolute crop-growth rate;
+- `rm`: early relative-rate parameter;
+- `tb`: transition-position parameter.
+
+Unlike logistic, Gompertz, Richards, Weibull, or Chapman-Richards growth, expolinear growth has no finite upper biomass asymptote. Therefore `growth_time_to(..., fraction = ...)` is intentionally unavailable for expolinear fits.
+
+```{r}
+w <- growth_example_data("wheat_expolinear")
+w0 <- subset(w, nitrogen == unique(w$nitrogen)[1])
+f_exp <- growth_fit(w0, "expolinear", time = "day", response = "biomass_g_m2")
+coef(f_exp)
+growth_maxrate(f_exp)
+growth_time_to(f_exp, target = c(200, 400))
+```
+
+# Model parameterizations are package-specific
+
+Never assume that parameters with similar names have identical definitions across R packages or publications. The package documents the exact implemented equation and extracts common biological traits so that scientific comparisons can be made on interpretable quantities such as t50 and maximum rate rather than on superficially similar coefficient names.
+
+# Choosing a candidate set
+
+A useful candidate set should be specified before looking only at information criteria.
+
+Questions to ask include:
+
+1. Is an upper asymptote biologically meaningful?
+2. Is growth determinate within the study period?
+3. Is the trajectory approximately symmetric around inflection?
+4. Does the experiment include enough early and late support to estimate asymmetry?
+5. Is the crop expected to enter an approximately linear canopy-growth regime?
+6. Are parameter estimates intended for biological interpretation or only interpolation?
+
+Example candidate set:
+
+```{r}
+cs <- growth_fit(
+  d1,
+  c("logistic", "gompertz"),
+  time = "day",
+  response = "biomass_g",
+  n_start = 6,
+  seed = 2026
+)
+growth_compare(cs)
+growth_traits(cs)
+```
+
+# What not to do
+
+Do not fit every available curve and select the smallest AICc without a biological candidate rationale.
+
+Do not compare AICc values from different response transformations or different observations.
+
+Do not interpret a finite asymptote estimated almost entirely by extrapolation as if it were directly observed.
+
+Do not use separate group-specific NLS curves as a formal test of treatment differences when the experiment requires a common hierarchical covariance model.
+
+Do not report a beta-growth `te` without describing the time origin and the amount of observed support near maturity.
+
+# Reporting checklist
+
+A report based on the 0.2.0 model library should state:
+
+- biological response and units;
+- time variable and its origin;
+- sampling mechanism;
+- experimental unit;
+- aggregation performed before fitting;
+- candidate equations and parameterizations;
+- number of starts and fitting engine;
+- convergence and boundary diagnostics;
+- same-observation comparison criteria;
+- biologically interpretable derived traits;
+- whether important traits are interpolated or extrapolated;
+- limitations of ordinary NLS for the experiment.
+
+# Next vignette
+
+Continue with `v08-starting-values-and-multistart.Rmd` to understand initialization, bounds, repeated starts, and numerical failure diagnostics.

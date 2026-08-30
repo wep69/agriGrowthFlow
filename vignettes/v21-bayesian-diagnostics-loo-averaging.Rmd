@@ -1,0 +1,376 @@
+---
+title: "Bayesian Diagnostics, PSIS-LOO, and Growth-Model Averaging"
+author: "agriGrowthFlow"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Bayesian Diagnostics, PSIS-LOO, and Growth-Model Averaging}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+# 1. Three questions that must remain separate
+
+A Bayesian growth analysis contains at least three distinct evaluation problems:
+
+1. Did the Markov chains explore the intended posterior distribution adequately?
+2. Does the fitted model generate data resembling scientifically relevant features of the observations?
+3. How well is the model expected to predict held-out observations compared with plausible alternatives?
+
+Version 0.4.0 uses `posterior`-based MCMC diagnostics, `brms` posterior predictive checks, and `loo` Pareto-smoothed leave-one-out cross-validation. These tools are complementary rather than interchangeable.
+
+The modern rank-normalized \(\hat R\) and effective sample-size framework is described by @VehtariEtAl2021. PSIS-LOO methodology is developed by @VehtariGelmanGabry2017. Model stacking follows the predictive-combination framework of @YaoEtAl2018.
+
+# 2. Fit competing models to identical observations
+
+The critical requirement for predictive comparison is that candidate models use the same prepared observations. Missingness filtering, aggregation, or group subsets must not differ silently between models.
+
+```{r setup-data}
+sun <- growth_example_data("sunflower_sigmoid")
+sun1 <- subset(sun, cultivar == unique(sun$cultivar)[1])
+```
+
+```{r fit-models, eval=FALSE}
+b_log <- growth_bayes(
+  sun1,
+  "logistic",
+  time = "day",
+  response = "biomass_g",
+  random = "none",
+  group_effects = "none",
+  chains = 4,
+  iter = 2500,
+  warmup = 1250,
+  seed = 5001
+)
+
+b_gom <- growth_bayes(
+  sun1,
+  "gompertz",
+  time = "day",
+  response = "biomass_g",
+  random = "none",
+  group_effects = "none",
+  chains = 4,
+  iter = 2500,
+  warmup = 1250,
+  seed = 5002
+)
+```
+
+`agri_growth_bayes` objects store an `observation_key`. `growth_model_average()` refuses to combine candidate models when these keys differ.
+
+# 3. Gate 1: sampler diagnostics
+
+```{r diag, eval=FALSE}
+d_log <- growth_bayes_diagnose(b_log)
+d_gom <- growth_bayes_diagnose(b_gom)
+
+d_log
+d_gom
+```
+
+A predictive score should not be used to choose between poorly sampled posterior distributions. First resolve divergences, \(\hat R\) problems, or inadequate ESS.
+
+# 4. Rank-normalized R-hat
+
+For multiple chains, \(\hat R\) compares between-chain and within-chain behavior. Values near one are desirable. The 0.4.0 diagnostic wrapper flags values above 1.01, following current conservative practice described by @VehtariEtAl2021.
+
+A passing \(\hat R\) is necessary but not sufficient. It does not guarantee that the scientific model is adequate.
+
+# 5. Bulk and tail ESS
+
+Bulk ESS concerns central posterior summaries such as means and medians. Tail ESS is particularly relevant to interval endpoints and tail probabilities.
+
+```{r diag-table, eval=FALSE}
+subset(d_log$parameters, rhat > 1.01 | ess_bulk < 400 | ess_tail < 400)
+```
+
+When the scientific result depends on a narrow tail probability, a low tail ESS deserves more attention than the raw total number of stored draws.
+
+# 6. Divergences
+
+Hamiltonian Monte Carlo divergences indicate that numerical trajectories encountered problematic posterior geometry. A model can have \(\hat R\) near one and still have divergences.
+
+`growth_bayes_diagnose()` reports their count explicitly.
+
+Potential responses include:
+
+- reconsidering parameterization;
+- using more informative but scientifically justified priors;
+- simplifying a weakly identified hierarchy;
+- increasing `adapt_delta` when appropriate;
+- collecting more informative data.
+
+# 7. Gate 2: posterior predictive checking
+
+```{r ppcheck, eval=FALSE}
+growth_pp_check(b_log, type = "dens_overlay", ndraws = 100)
+growth_pp_check(b_log, type = "scatter_avg", ndraws = 100)
+```
+
+A density overlay checks marginal response distribution but can miss temporal structure. A growth analysis should also inspect predictions across time and, when relevant, by treatment or persistent unit.
+
+The central question is not whether simulated datasets look visually identical to observed data. It is whether discrepancies relevant to the scientific question remain unexplained.
+
+# 8. Gate 3: predictive evaluation with PSIS-LOO
+
+Leave-one-out cross-validation asks how well a model predicts each observation when that observation is left out of its fitting information. Exact refitting for every observation is expensive. PSIS-LOO approximates this process from one posterior fit and diagnoses when importance sampling becomes unreliable [@VehtariGelmanGabry2017].
+
+```{r loo, eval=FALSE}
+l_log <- growth_loo(b_log)
+l_gom <- growth_loo(b_gom)
+
+l_log
+l_gom
+```
+
+The returned object retains the complete `psis_loo` result and Pareto-k values.
+
+# 9. Pareto-k diagnostics
+
+The importance ratios used by PSIS-LOO can become unstable for influential observations. `growth_loo()` reports counts above 0.7 and above 1.
+
+```{r pareto, eval=FALSE}
+summary(l_log$pareto_k)
+which(l_log$pareto_k > 0.7)
+```
+
+Large Pareto-k values are not merely a nuisance to hide. They can reveal influential harvests, underrepresented phases of growth, or model-data conflict.
+
+# 10. Moment matching
+
+For some difficult observations, `loo` can use moment matching to improve the PSIS approximation.
+
+```{r moment, eval=FALSE}
+l_log_mm <- growth_loo(b_log, moment_match = TRUE)
+```
+
+Moment matching should be documented when used. If diagnostics remain problematic, exact leave-one-out refitting or K-fold cross-validation may be needed outside the convenience wrapper.
+
+# 11. LOO is predictive, not ontological
+
+A lower expected predictive loss does not prove that one curve is the true biological law. Candidate growth equations are approximations. A model can predict well over observed time while giving less credible extrapolation or less interpretable parameters.
+
+Model comparison should therefore combine:
+
+- predictive performance;
+- residual and posterior predictive behavior;
+- parameter identifiability;
+- biological plausibility;
+- uncertainty in derived traits.
+
+# 12. Why identical observations are enforced
+
+If one candidate uses 80 observations and another 74 because of different preprocessing, their pointwise log predictive densities are not directly comparable in the intended way.
+
+Version 0.4.0 stores a prepared-data key in each Bayesian object and refuses model averaging when candidate keys differ.
+
+This is a deliberate safety feature.
+
+# 13. Model stacking
+
+When several models make complementary predictions, selecting one winner can discard useful predictive information. Stacking chooses nonnegative weights that optimize the predictive performance of the weighted predictive distribution [@YaoEtAl2018].
+
+```{r stacking, eval=FALSE}
+avg_w <- growth_model_average(
+  b_log,
+  b_gom,
+  method = "stacking",
+  type = "weights"
+)
+
+avg_w
+```
+
+The weights sum to one. They are predictive combination weights, not posterior probabilities that a model is true.
+
+# 14. Pseudo-BMA and pseudo-BMA+
+
+The alternative `method = "pseudobma"` uses LOO-based model scores. With `BB = TRUE`, the `loo` implementation uses Bayesian-bootstrap uncertainty for pseudo-BMA+ weights.
+
+```{r pseudobma, eval=FALSE}
+growth_model_average(
+  b_log,
+  b_gom,
+  method = "pseudobma",
+  BB = TRUE,
+  type = "weights"
+)
+```
+
+Stacking and pseudo-BMA answer similar predictive-combination questions with different optimization principles. The choice should be stated in the Methods section.
+
+# 15. Model-averaged expected response
+
+Weights can be used to form a mixture of posterior expected response draws.
+
+```{r epred, eval=FALSE}
+avg_epred <- growth_model_average(
+  b_log,
+  b_gom,
+  method = "stacking",
+  type = "epred",
+  ndraws = 2000,
+  seed = 5010
+)
+
+head(avg_epred$prediction)
+```
+
+`type = "epred"` averages uncertainty in the conditional mean response. It does not add a new observation-level residual draw.
+
+# 16. Model-averaged predictive distribution
+
+For future observations, use `type = "predict"`:
+
+```{r predict, eval=FALSE}
+avg_pred <- growth_model_average(
+  b_log,
+  b_gom,
+  method = "stacking",
+  type = "predict",
+  ndraws = 2000,
+  seed = 5011
+)
+```
+
+This includes observation-level predictive variability from the individual Bayesian models.
+
+# 17. Expected response versus future observation
+
+This distinction should be explicit in figures:
+
+- expected-response interval: uncertainty about the fitted mean trajectory;
+- predictive interval: uncertainty for a new response, including residual variation.
+
+A predictive interval is normally wider.
+
+# 18. How the mixture is constructed
+
+Version 0.4.0 uses a Monte Carlo mixture:
+
+1. draw a candidate model according to the LOO weight vector;
+2. sample one posterior expected or predictive trajectory from that model;
+3. repeat for the requested number of mixture draws;
+4. summarize the resulting mixture distribution pointwise.
+
+This respects the full predictive mixture instead of merely averaging model-specific interval endpoints.
+
+# 19. New time grids
+
+A model-averaged prediction can be requested on a common standardized `newdata` grid.
+
+```{r newdata, eval=FALSE}
+nd <- b_log$data[rep(1, 101), , drop = FALSE]
+nd$agf_time <- seq(min(b_log$data$agf_time), max(b_log$data$agf_time), length.out = 101)
+
+avg_grid <- growth_model_average(
+  b_log,
+  b_gom,
+  type = "epred",
+  newdata = nd,
+  ndraws = 2000,
+  seed = 5012
+)
+```
+
+Do not silently extrapolate the grid beyond the observed support when the manuscript claims empirical inference within the experiment.
+
+# 20. Model averaging does not solve model misspecification
+
+If all candidate models omit an important stress response or phase change, their weighted average still omits it. Model averaging distributes weight among the submitted candidates. It does not create a biologically missing candidate.
+
+# 21. Relationship to bootstrap selection stability
+
+Bootstrap selection stability from `growth_selection_stability()` and Bayesian stacking answer different questions.
+
+Bootstrap stability asks:
+
+> How often does each model win a selection criterion when the observed sample is resampled?
+
+Stacking asks:
+
+> Which predictive weights combine posterior predictive distributions to perform well under LOO?
+
+A model can have moderate bootstrap selection frequency and still receive substantial stacking weight.
+
+# 22. Model-specific traits versus averaged predictions
+
+Model averaging is straightforward for predictions on a common response scale. Averaging a model-specific parameter such as a Logistic scale with a Gompertz scale is not meaningful.
+
+For biological traits with common definitions, such as time to 50% of each model's asymptote, one can compare model-specific posterior trait distributions. A future package version may add trait-level model mixtures after the common estimand is formally defined for all included families.
+
+# 23. A complete evaluation sequence
+
+For each Bayesian candidate:
+
+1. inspect prior predictive behavior;
+2. fit the posterior model;
+3. verify \(\hat R\), ESS, and divergences;
+4. inspect posterior predictive behavior;
+5. compute PSIS-LOO;
+6. inspect Pareto-k;
+7. compare predictive performance;
+8. evaluate biological trait sensitivity;
+9. use stacking only if a predictive mixture serves the scientific goal.
+
+# 24. What not to do
+
+Do not:
+
+- compute LOO from a model whose sampler diagnostics fail;
+- ignore Pareto-k values because the total LOO score looks favorable;
+- compare models fitted to different observations;
+- call stacking weights model probabilities;
+- average coefficients with incompatible meanings across curve families;
+- use predictive model averaging to hide poor candidate specification;
+- report only the best LOO score without uncertainty or diagnostics.
+
+# 25. Methods-language template
+
+> Bayesian candidate growth models were fitted to identical prepared observations and evaluated using Pareto-smoothed leave-one-out cross-validation. Pareto-k diagnostics were inspected before model comparison. Predictive model weights were obtained by stacking of pointwise leave-one-out predictive densities. Population-level expected-response summaries were generated from a Monte Carlo mixture of model-specific posterior predictions using the estimated stacking weights.
+
+State whether `epred` or `predict` was used, and report software versions.
+
+# 26. Results-language template
+
+> Both candidate models satisfied the prespecified MCMC diagnostics. PSIS-LOO diagnostics were examined for influential observations before computing predictive weights. The resulting stacking distribution was used to summarize the expected growth trajectory while preserving model-form uncertainty among the submitted candidates.
+
+Again, numerical values must come from the actual final fit.
+
+# 27. Reproducibility checklist
+
+Record:
+
+- exact candidate models;
+- identical-data check;
+- priors;
+- posterior diagnostics;
+- LOO version;
+- Pareto-k diagnostics;
+- weighting method;
+- Bayesian bootstrap option for pseudo-BMA;
+- number of mixture draws;
+- random-effects setting in predictions;
+- prediction grid;
+- seed.
+
+# 28. Summary
+
+Version 0.4.0 treats Bayesian model evaluation as a gated process:
+
+**sampler diagnostics -> posterior predictive checking -> PSIS-LOO diagnostics -> predictive comparison -> optional model averaging.**
+
+This sequence prevents a superficially convenient predictive score from bypassing computational or scientific model checks.
+
+# References

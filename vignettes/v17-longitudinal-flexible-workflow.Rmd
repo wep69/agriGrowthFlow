@@ -1,0 +1,1094 @@
+---
+title: "agriGrowthFlow 0.3.0 Foundations-to-Flexible Tutorial: From Design to Mixed, Smooth, and Functional Growth"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 0.3.0 Foundations-to-Flexible Tutorial: From Design to Mixed, Smooth, and Functional Growth}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+
+# 1. Tutorial purpose
+
+Version 0.3.0 extends the design-aware foundations and parametric growth layer with four complementary ways to analyze trajectories: longitudinal mixed effects, flexible smoothing and derivatives, shape constraints, and functional/multivariate curve representations. The goal of this tutorial is to teach when those approaches answer different questions rather than presenting them as interchangeable menu options.
+
+The scientific sequence remains:
+
+**design -> persistent unit -> raw trajectory -> model family -> dependence -> uncertainty -> biological interpretation.**
+
+# 2. What version 0.3.0 adds
+
+The public additions are:
+
+- `growth_mixed()`;
+- `growth_mixed_diagnose()`;
+- `growth_smooth()`;
+- `growth_smooth_predict()`;
+- `growth_derivative()`;
+- `growth_acceleration()`;
+- `growth_smooth_traits()`;
+- `growth_fpca()`;
+- `growth_functional()`;
+- `growth_curve_coefficients()`;
+- `growth_manova()`.
+
+The new layer directly addresses limitations documented at the end of the 0.2.0 tutorial.
+
+# 3. Four distinct statistical questions
+
+A mixed model asks how population trajectories and unit-to-unit variation behave under clustering. A flexible smoother asks what curve shape and derivatives are supported without choosing a fixed parametric equation. FPCA asks what dominant modes explain differences among entire unit trajectories. Polynomial MANOVA asks whether groups differ jointly in predefined orthogonal curve components.
+
+No one of these questions subsumes the others.
+
+# 4. Core references
+
+Mixed-effects reasoning follows the grouped-data framework of Pinheiro and Bates and the growth-curve teaching logic of Mirman [@PinheiroBates2000; @Mirman2014]. Flexible plant-growth smoothing is grounded in Shipley and Hunt [@ShipleyHunt1996]. Shape constraints use the SCAM framework of Pya and Wood [@PyaWood2015]. Functional analysis follows the curve-as-data perspective of Ramsay and Silverman and the review by Wang, Chiou, and Müller [@RamsaySilverman2005; @WangChiouMuller2016]. The orthogonal component layer connects to Keuls and Garretsen [@KeulsGarretsen1982].
+
+# Part I. Start from the design
+
+## 5. Repeated measurements
+
+```{r}
+bean <- growth_example_data("bean_repeated")
+head(bean)
+```
+
+The same plant is measured at successive dates.
+
+## 6. Destructive serial harvest
+
+```{r}
+maize <- growth_example_data("maize_destructive")
+head(maize)
+```
+
+Different harvested biological subsamples occur at each date, but `plot_id` persists.
+
+## 7. Irregular repeated phenotyping
+
+```{r}
+irr <- growth_example_data("soybean_irregular")
+head(irr)
+with(irr, summary(table(plant_id)))
+```
+
+This dataset was generated specifically for 0.3.0 to teach irregular longitudinal and functional analysis. It is simulated.
+
+## 8. Declare repeated bean data
+
+```{r}
+gbean <- growth_data(
+  bean,
+  time = "day",
+  sampling = "repeated",
+  experimental_unit = "plant_id",
+  plant = "plant_id",
+  block = "block",
+  treatment = "water_regime",
+  leaf_area = "projected_leaf_area_m2",
+  metadata = list(source = "frozen simulated teaching data")
+)
+```
+
+## 9. Validate before analysis
+
+```{r}
+growth_validate(gbean)
+growth_plan(gbean)
+```
+
+## 10. Declare destructive maize data
+
+```{r}
+gmaize <- growth_data(
+  maize,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  plot = "plot_id",
+  block = "block",
+  treatment = "nitrogen",
+  total_mass = "total_mass_g"
+)
+```
+
+## 11. The design rule
+
+A changing harvest-unit identifier is not a repeated subject. The persistent experimental unit is the trajectory unit for design-level inference [@KeulsGarretsen1982].
+
+# Part II. Explore raw trajectories
+
+## 12. Why visualization precedes modeling
+
+Look for treatment separation, between-unit heterogeneity, curvature, irregular observation times, changing variance, and discrete biological events.
+
+```{r}
+growth_plot(gbean, response = "height_cm")
+```
+
+## 13. Plot canopy area
+
+```{r}
+growth_plot(gbean, response = "projected_leaf_area_m2")
+```
+
+## 14. Inspect observation counts
+
+```{r}
+with(bean, table(plant_id))
+with(irr, table(table(plant_id)))
+```
+
+## 15. Inspect treatment balance
+
+```{r}
+with(bean, table(water_regime, block))
+with(irr, table(water_regime, block))
+```
+
+# Part III. Mixed-effects growth
+
+## 16. Population and plant components
+
+A mixed trajectory model is
+
+$$
+y_{ij}=\mathbf{x}_{ij}^{\mathsf T}\boldsymbol\beta+\mathbf{z}_{ij}^{\mathsf T}\mathbf b_i+\varepsilon_{ij}.
+$$
+
+The fixed terms describe population growth; random terms describe persistent-unit departures [@PinheiroBates2000].
+
+## 17. Fit a quadratic mixed model
+
+```{r}
+if (requireNamespace("nlme", quietly=TRUE)) {
+  m1 <- growth_mixed(
+    gbean,
+    response="height_cm",
+    degree=2,
+    random_degree=1,
+    method="REML"
+  )
+  m1
+}
+```
+
+## 18. Why orthogonal polynomials
+
+They provide stable low-dimensional shape components. They do not directly estimate a biological asymptote or instantaneous rate.
+
+## 19. Random intercept only
+
+```{r eval=FALSE}
+m_ri <- growth_mixed(gbean, response="height_cm", degree=2, random_degree=0)
+```
+
+## 20. Random slope
+
+```{r eval=FALSE}
+m_rs <- growth_mixed(gbean, response="height_cm", degree=2, random_degree=1)
+```
+
+## 21. Random curvature
+
+```{r eval=FALSE}
+m_rc <- growth_mixed(gbean, response="height_cm", degree=2, random_degree=2)
+```
+
+Increasing random-effect complexity should follow information and design rather than a universal rule.
+
+## 22. Discrete AR(1)
+
+```{r}
+if (requireNamespace("nlme", quietly=TRUE)) {
+  m_ar1 <- growth_mixed(gbean, response="height_cm", degree=2,
+                        random_degree=1, correlation="ar1")
+}
+```
+
+## 23. Continuous-time AR(1)
+
+```{r}
+if (requireNamespace("nlme", quietly=TRUE)) {
+  m_car <- growth_mixed(irr, time="day", response="height_cm",
+                        unit="plant_id", group="water_regime", block="block",
+                        degree=2, random_degree=1, correlation="car1")
+}
+```
+
+## 24. Why two AR structures
+
+Equally spaced index dependence and irregular continuous-time decay are not the same model.
+
+## 25. Mean-dependent variance
+
+```{r eval=FALSE}
+m_pow <- growth_mixed(gbean, response="projected_leaf_area_m2",
+                      degree=2, random_degree=1, variance="power")
+```
+
+## 26. Group-specific variance
+
+```{r eval=FALSE}
+m_gv <- growth_mixed(gbean, response="height_cm", degree=2,
+                     random_degree=1, variance="group")
+```
+
+## 27. Time-specific variance
+
+```{r eval=FALSE}
+m_tv <- growth_mixed(gbean, response="height_cm", degree=2,
+                     random_degree=1, variance="time")
+```
+
+## 28. Diagnose
+
+```{r}
+if (requireNamespace("nlme", quietly=TRUE)) {
+  growth_mixed_diagnose(m1)
+}
+```
+
+## 29. Within-unit residual correlation
+
+The diagnostic is computed separately inside each plant or plot. Cross-unit residual adjacency is meaningless.
+
+## 30. ML versus REML
+
+Use ML for comparing different fixed-effect structures and REML for final variance estimation when appropriate [@PinheiroBates2000].
+
+## 31. A destructive mixed example
+
+```{r}
+if (requireNamespace("nlme", quietly=TRUE)) {
+  md <- growth_mixed(gmaize, degree=2, random_degree=0, correlation="ar1")
+  md$aggregation
+  nrow(md$data)
+}
+```
+
+The source rows are first summarized at persistent plot by harvest.
+
+# Part IV. Flexible mean trajectories
+
+## 32. Why leave the parametric family
+
+The 0.2.0 equations remain valuable. Flexible smooths are added for trajectories whose shape is not well represented by one chosen equation or when local rates are the primary interest [@ShipleyHunt1996].
+
+## 33. Smoothing spline
+
+```{r}
+ss <- growth_smooth(bean, time="day", response="height_cm",
+                    group="water_regime", method="smooth_spline")
+ss
+```
+
+## 34. Predict the curve
+
+```{r}
+ps <- growth_smooth_predict(ss, n=100)
+head(ps)
+```
+
+## 35. First derivative
+
+```{r}
+r1 <- growth_derivative(ss, order=1, n=100)
+head(r1)
+```
+
+## 36. Second derivative
+
+```{r}
+r2 <- growth_acceleration(ss, n=100)
+head(r2)
+```
+
+## 37. Smooth landmarks
+
+```{r}
+growth_smooth_traits(ss, n=400)
+```
+
+## 38. Smoothing objective
+
+A smoothing spline balances fit and roughness:
+
+$$
+\sum_i\{y_i-f(t_i)\}^2+\lambda\int\{f''(t)\}^2dt.
+$$
+
+## 39. Cross-validation
+
+```{r}
+ss_cv <- growth_smooth(bean, time="day", response="height_cm",
+                       method="smooth_spline", cv=TRUE)
+```
+
+Shipley and Hunt also showed why smoothing-parameter uncertainty deserves attention [@ShipleyHunt1996].
+
+## 40. LOESS
+
+```{r}
+sl <- growth_smooth(bean, time="day", response="height_cm",
+                    group="water_regime", method="loess", span=.75)
+```
+
+## 41. Span sensitivity
+
+```{r eval=FALSE}
+sl50 <- growth_smooth(bean, time="day", response="height_cm", method="loess", span=.50)
+sl75 <- growth_smooth(bean, time="day", response="height_cm", method="loess", span=.75)
+sl90 <- growth_smooth(bean, time="day", response="height_cm", method="loess", span=.90)
+```
+
+## 42. GAM
+
+```{r}
+if (requireNamespace("mgcv", quietly=TRUE)) {
+  sg <- growth_smooth(bean, time="day", response="height_cm", method="gam", k=6)
+  growth_smooth_traits(sg)
+}
+```
+
+## 43. Why GAM is optional
+
+The package stays usable without the optional engine. The original fitted object is retained when the engine is available.
+
+## 44. Derivative units
+
+Height in cm over days yields cm day$^{-1}$; acceleration is cm day$^{-2}$.
+
+## 45. Relative growth from a smooth
+
+For positive biomass:
+
+```{r eval=FALSE}
+p <- growth_smooth_predict(sb, n=200)
+d <- growth_derivative(sb, order=1, time=p$time)
+p$rgr <- d$derivative / p$fit
+```
+
+## 46. Boundary caution
+
+Derivative features at the first and last observed times are more sensitive to smoothing and finite-difference choices.
+
+# Part V. Shape-constrained growth
+
+## 47. Why shape constraints
+
+If a biological phase is known to be monotonic, a constrained smooth can prevent noise-driven reversals without imposing a full parametric sigmoid [@PyaWood2015].
+
+## 48. Increasing fit
+
+```{r}
+if (requireNamespace("scam", quietly=TRUE) && requireNamespace("mgcv", quietly=TRUE)) {
+  sc <- growth_smooth(bean, time="day", response="height_cm",
+                      method="scam", constraint="increasing", k=6)
+  sc
+}
+```
+
+## 49. Check the derivative
+
+```{r eval=FALSE}
+dsc <- growth_derivative(sc, order=1, n=200)
+range(dsc$derivative, na.rm=TRUE)
+```
+
+## 50. Constraint is phase-specific
+
+Do not impose increasing behavior over a full canopy cycle that includes senescence.
+
+## 51. Constraint and defoliation
+
+Leaf area can decline abruptly under defoliation. Anten and Ackerly demonstrate why biomass-loss events need explicit growth analysis rather than a forced monotonic smooth [@AntenAckerly2001].
+
+## 52. Constraint sensitivity
+
+Fit an unconstrained benchmark. If scientifically important landmarks change substantially, report that dependence.
+
+# Part VI. Functional trajectories
+
+## 53. Curve-as-observation concept
+
+Functional data analysis represents each plant as a function [@RamsaySilverman2005; @WangChiouMuller2016].
+
+## 54. FPCA model
+
+$$
+X_i(t)=\mu(t)+\sum_k\xi_{ik}\phi_k(t).
+$$
+
+## 55. Grid FPCA
+
+```{r}
+fp <- growth_fpca(bean, time="day", response="height_cm",
+                  unit="plant_id", group="water_regime", npc=2)
+fp
+```
+
+## 56. Scores
+
+```{r}
+head(fp$scores_table)
+```
+
+## 57. Eigenfunctions
+
+```{r}
+matplot(fp$grid, fp$eigenfunctions, type="l", lty=1,
+        xlab="Day", ylab="Eigenfunction")
+```
+
+## 58. Sign ambiguity
+
+An eigenfunction and its scores can both be multiplied by minus one with no change in reconstruction.
+
+## 59. PVE
+
+```{r}
+fp$pve_each
+fp$pve_cumulative
+```
+
+## 60. Automatic PVE target
+
+```{r}
+fp95 <- growth_fpca(bean, time="day", response="height_cm",
+                    unit="plant_id", pve=.95)
+fp95$npc
+```
+
+## 61. Irregular FPCA
+
+```{r}
+fpi <- growth_fpca(irr, time="day", response="height_cm",
+                    unit="plant_id", group="water_regime", npc=2)
+fpi
+```
+
+## 62. Common support safeguard
+
+The built-in engine reconstructs only where all units have overlapping observed support.
+
+## 63. PACE backend
+
+```{r eval=FALSE}
+if (requireNamespace("fdapace", quietly=TRUE)) {
+  fpp <- growth_fpca(irr, time="day", response="height_cm",
+                     unit="plant_id", group="water_regime",
+                     engine="fdapace", pve=.95)
+}
+```
+
+## 64. `refund` backend
+
+```{r eval=FALSE}
+if (requireNamespace("refund", quietly=TRUE)) {
+  fpr <- growth_fpca(irr, time="day", response="height_cm",
+                     unit="plant_id", group="water_regime",
+                     engine="refund", pve=.95)
+}
+```
+
+## 65. Functional interpretation
+
+Inspect mean plus and minus one eigenfunction amplitude. Do not name FPC1 based only on a score-treatment correlation.
+
+## 66. Functional registration limitation
+
+Version 0.3.0 does not align phenological phases before FPCA. Timing and amplitude variation may therefore mix.
+
+# Part VII. Orthogonal components and MANOVA
+
+## 67. Classical multivariate growth idea
+
+Keuls and Garretsen reduce balanced curves to polynomial components and compare them jointly [@KeulsGarretsen1982].
+
+## 68. Coefficient extraction
+
+```{r}
+cf <- growth_curve_coefficients(
+  maize,
+  time="day",
+  response="total_mass_g",
+  unit="plot_id",
+  group="nitrogen",
+  degree=2
+)
+head(cf)
+```
+
+## 69. Common-grid safeguard
+
+All persistent units must share the same observed times. No hidden interpolation is performed.
+
+## 70. Log-scale components
+
+```{r}
+cf_log <- growth_curve_coefficients(
+  maize, time="day", response="total_mass_g",
+  unit="plot_id", group="nitrogen", degree=2,
+  transform="log"
+)
+```
+
+## 71. MANOVA
+
+```{r}
+mv <- growth_manova(
+  maize,
+  time="day",
+  response="total_mass_g",
+  unit="plot_id",
+  group="nitrogen",
+  degree=2,
+  test="Pillai"
+)
+mv
+```
+
+## 72. Component ANOVA
+
+```{r eval=FALSE}
+mv$component_anova
+```
+
+Use as secondary interpretation of the multivariate result.
+
+## 73. Why MANOVA is not a mixed model
+
+The curve is first reduced to one coefficient vector per unit. Serial covariance is not estimated jointly with fixed effects.
+
+## 74. Why FPCA is not MANOVA
+
+Polynomial basis functions are predetermined; functional principal components are data-adaptive.
+
+# Part VIII. Method selection by data structure
+
+## 75. Six scheduled repeated times
+
+If treatment inference and within-plant dependence are central, start with a mixed model. Smooths can provide shape sensitivity.
+
+## 76. Dense phenotyping
+
+Use flexible smoothing for rates and FPCA for between-trajectory variation. A mixed GAMM may be needed for formal inference.
+
+## 77. Balanced destructive harvest
+
+Plot-level component MANOVA can be informative when every plot shares the same time grid. Mixed plot-level models are another option.
+
+## 78. Irregular sparse repeated data
+
+Use a continuous-time covariance model for mixed inference and a sparse FPCA backend for functional variation.
+
+## 79. Strong biological sigmoid
+
+Keep the 0.2.0 parametric layer for asymptote, inflection, and target-time traits. Add mixed or flexible methods when dependence or shape uncertainty matters.
+
+## 80. Monotone phase without asymptote interest
+
+A SCAM can encode monotonicity while retaining local flexibility.
+
+# Part IX. Worked integrated case study: water regime
+
+## 81. Question
+
+Does water regime alter bean growth trajectory, and when does the strongest canopy expansion occur?
+
+## 82. Design
+
+Plant is the repeated unit, block is a design factor, water regime is treatment.
+
+## 83. Mixed inference
+
+```{r eval=FALSE}
+m <- growth_mixed(gbean, response="projected_leaf_area_m2",
+                  degree=2, random_degree=1,
+                  correlation="ar1", variance="power", method="REML")
+```
+
+## 84. Diagnostic
+
+```{r eval=FALSE}
+growth_mixed_diagnose(m)
+```
+
+## 85. Flexible descriptive curves
+
+```{r}
+s <- growth_smooth(bean, time="day", response="projected_leaf_area_m2",
+                   group="water_regime", method="smooth_spline", cv=TRUE)
+```
+
+## 86. Expansion rates
+
+```{r}
+dr <- growth_derivative(s, order=1, n=150)
+```
+
+## 87. Landmarks
+
+```{r}
+lt <- growth_smooth_traits(s, n=500)
+lt
+```
+
+## 88. Functional heterogeneity
+
+```{r}
+fpa <- growth_fpca(bean, time="day", response="projected_leaf_area_m2",
+                   unit="plant_id", group="water_regime", npc=2)
+```
+
+## 89. Interpretation hierarchy
+
+Use the mixed model for treatment inference under the specified covariance structure. Use smooth derivatives to describe timing and magnitude of mean expansion. Use FPCA scores and eigenfunctions to describe how individual trajectories vary around that mean.
+
+## 90. Avoid double-dipping
+
+Do not choose a time of maximum treatment separation from the same smooth and then report an unadjusted pointwise test at that chosen time as confirmatory evidence.
+
+# Part X. Worked integrated case study: destructive nitrogen series
+
+## 91. Question
+
+Do nitrogen treatments differ in whole-curve biomass pattern across serial harvests?
+
+## 92. Correct persistent unit
+
+Plot, not harvested plant.
+
+## 93. Coefficient approach
+
+```{r}
+cm <- growth_curve_coefficients(maize, time="day", response="total_mass_g",
+                                unit="plot_id", group="nitrogen", degree=2)
+```
+
+## 94. Joint multivariate comparison
+
+```{r}
+mmv <- growth_manova(maize, time="day", response="total_mass_g",
+                     unit="plot_id", group="nitrogen", degree=2)
+```
+
+## 95. Flexible group curves
+
+```{r}
+sm <- growth_smooth(gmaize, response="total_mass_g", group="nitrogen",
+                    method="smooth_spline")
+```
+
+## 96. Why both are useful
+
+MANOVA provides joint component comparison; smooths visualize nonlinear shape and rates. Neither changes the plot-level replication.
+
+# Part XI. Known-truth and regression tests
+
+## 97. Linear derivative
+
+For $y=3+2t$, the first derivative should be 2.
+
+```{r eval=FALSE}
+d <- expand.grid(unit=paste0("u",1:8), time=0:10)
+d$y <- 3+2*d$time
+s <- growth_smooth(d, time="time", response="y")
+growth_derivative(s, order=1, time=2:8)
+```
+
+## 98. Linear acceleration
+
+The second derivative should be approximately zero in the interior.
+
+## 99. FPCA score count
+
+The bean data contain 32 persistent plants, so the built-in FPCA score table should contain 32 rows.
+
+## 100. Destructive aggregation
+
+The maize source contains 144 rows and must reduce to 72 plot-time means before persistent plot longitudinal modeling.
+
+## 101. Common-grid refusal
+
+Removing one harvest from one unit should make `growth_curve_coefficients()` stop rather than interpolate.
+
+## 102. AR1 integer-time guard
+
+A noninteger time variable should be rejected for discrete `ar1`; use `car1` for continuous irregular time.
+
+# Part XII. Reproducibility and engines
+
+## 103. Optional dependencies
+
+Version 0.3.0 uses optional established engines rather than reimplementing them incompletely:
+
+- `nlme` for mixed effects;
+- `mgcv` for GAM;
+- `scam` for shape-constrained GAM;
+- `fdapace` for sparse FPCA;
+- `refund` for functional analysis.
+
+The package never installs these automatically.
+
+## 104. Original engine object
+
+Wrapper results retain the fitted backend object so advanced users can inspect engine-specific diagnostics and methods.
+
+## 105. R-first design
+
+No Python dependency is required by the 0.3.0 public API.
+
+## 106. Simulated teaching data
+
+All new teaching data are explicitly simulated. Their treatment patterns must not be cited as empirical agronomic evidence.
+
+# Part XIII. Reporting architecture
+
+## 107. Methods should identify the estimand
+
+State whether the target is population mean trajectory, treatment trajectory difference, individual functional variation, or multivariate component difference.
+
+## 108. Methods should identify the unit
+
+State plant, pot, plot, quadrat, or other persistent experimental unit.
+
+## 109. Methods should identify time
+
+State calendar days, days after emergence, thermal time, developmental stage, or other domain.
+
+## 110. Methods should identify covariance
+
+For mixed models, state random effects, residual correlation, and variance functions.
+
+## 111. Methods should identify smoothing
+
+For smooths, state method and tuning or estimation rule.
+
+## 112. Methods should identify functional reconstruction
+
+For FPCA, state support, smoothing/interpolation, component-selection rule, and engine.
+
+## 113. Methods should identify MANOVA basis
+
+State degree, transformation, and multivariate test statistic.
+
+# Part XIV. Common analytical failures
+
+## 114. Pseudoreplication
+
+A sophisticated model does not transform subsamples into independent treatment replicates.
+
+## 115. Silent time regularization
+
+Do not replace irregular real times with equally spaced indices without justification.
+
+## 116. Smoother overinterpretation
+
+A smooth curve is an estimate, not the plant's exact continuous path.
+
+## 117. Derivative overinterpretation
+
+A peak derivative is method-dependent and uncertain.
+
+## 118. FPCA naming by intuition alone
+
+Inspect eigenfunctions and reconstructed modes.
+
+## 119. MANOVA dimension inflation
+
+Too many polynomial components relative to units destabilize covariance estimation.
+
+## 120. Constraint after seeing the answer
+
+A shape restriction should be justified biologically, preferably before inspecting treatment results.
+
+## 121. Covariance selection by one p-value
+
+Use design, diagnostics, information, and scientific plausibility.
+
+## 122. Ignoring missingness mechanism
+
+Plant death and treatment-driven dropout can be informative.
+
+## 123. Extrapolating smooth derivatives
+
+Keep derivative interpretation within observed support.
+
+## 124. Treating FPCA PVE as biological importance
+
+A low-variance mode can still predict yield or stress response.
+
+# Part XV. Decision matrix
+
+## 125. Parametric curve
+
+Use when biological curve parameters are primary and equation shape is defensible.
+
+## 126. Mixed polynomial curve
+
+Use when repeated-unit dependence and treatment trajectory inference are primary and low-order polynomial shape is adequate.
+
+## 127. Flexible smooth
+
+Use when local shape and derivatives matter more than parametric coefficients.
+
+## 128. SCAM
+
+Use when a scientifically justified derivative-sign constraint should be enforced.
+
+## 129. FPCA
+
+Use when the whole trajectory is the observational object and dominant modes of between-unit variation are needed.
+
+## 130. Polynomial MANOVA
+
+Use for balanced common-grid curves when low-dimensional joint component comparison is useful.
+
+# Part XVI. Suggested publication figures
+
+## 131. Raw trajectory figure
+
+Show thin unit lines with treatment-level summaries.
+
+## 132. Mixed-model figure
+
+Show fitted population trajectories and uncertainty from the selected covariance model.
+
+## 133. Smooth plus derivative figure
+
+Use separate panels for response and rate.
+
+## 134. FPCA modes figure
+
+Show mean and mean plus/minus one component amplitude.
+
+## 135. FPCA score figure
+
+Plot unit scores with design grouping and, where relevant, blocks or environments.
+
+## 136. MANOVA coefficient figure
+
+Plot pairs of coefficient components with treatment symbols.
+
+# Part XVII. Suggested table outputs
+
+## 137. Design table
+
+Report units, treatments, blocks, observation counts, time range, and missingness.
+
+## 138. Mixed-model table
+
+Report fixed effects, random-effect SDs, residual SD, covariance structure, AIC/BIC, and estimation method.
+
+## 139. Smooth landmark table
+
+Report maximum rate, time of maximum rate, peak within support, and approximate inflection regions together with method.
+
+## 140. FPCA table
+
+Report eigenvalues, component PVE, cumulative PVE, and interpretation.
+
+## 141. MANOVA table
+
+Report selected multivariate statistic and component summaries.
+
+# Part XVIII. Integration with 0.1.0 classical indices
+
+## 142. Classical interval RGR
+
+Classical RGR remains valuable when discrete harvest intervals are scientifically central [@Hunt1990].
+
+## 143. Smooth instantaneous rate
+
+A derivative answers a continuous-time descriptive question. Do not claim it is the same estimand as an interval average without qualification.
+
+## 144. LAR, SLA, and LMR trajectories
+
+These indices can themselves be repeated responses and modeled longitudinally when measured consistently.
+
+## 145. LAI trajectories
+
+Dense LAI monitoring is a natural candidate for flexible smoothing and derivatives.
+
+# Part XIX. Integration with 0.2.0 parametric traits
+
+## 146. Compare parametric and smooth inflection
+
+If a Logistic and a flexible smooth produce similar inflection timing, that concordance supports the landmark. If they differ substantially, investigate model sensitivity.
+
+## 147. Compare maximum rate
+
+Parametric maximum rate is equation-based. Smooth maximum rate is smoothing-based. Their uncertainty sources differ.
+
+## 148. Compare target times
+
+Parametric t50 or t90 depend on the model's upper level. Flexible smooths do not invent an asymptote and therefore should not automatically produce fractional-asymptote target times.
+
+# Part XX. What 0.3.0 deliberately postpones
+
+## 149. Nonlinear mixed effects
+
+Biologically interpretable random Logistic/Richards parameters are planned for a later layer rather than approximated here.
+
+## 150. Bootstrap uncertainty
+
+Bootstrap of smooth landmarks, mixed predictions, and FPCA components belongs to the dedicated uncertainty version.
+
+## 151. Bayesian hierarchy
+
+Bayesian nonlinear and flexible models remain planned.
+
+## 152. Multiphasic events
+
+Diphasic and disturbance-aware curves require dedicated numerical treatment.
+
+## 153. Functional registration
+
+Phase-amplitude separation is not yet implemented.
+
+## 154. Functional regression
+
+FPCA scores are exposed, but scalar-on-function and function-on-scalar regression are not wrapped yet.
+
+# Part XXI. End-to-end reproducible script
+
+## 155. Load and declare
+
+```{r eval=FALSE}
+d <- growth_example_data("bean_repeated")
+g <- growth_data(
+  d,
+  time="day",
+  sampling="repeated",
+  experimental_unit="plant_id",
+  plant="plant_id",
+  block="block",
+  treatment="water_regime",
+  leaf_area="projected_leaf_area_m2"
+)
+```
+
+## 156. Validate
+
+```{r eval=FALSE}
+growth_validate(g)
+growth_plan(g)
+```
+
+## 157. Mixed model
+
+```{r eval=FALSE}
+m <- growth_mixed(
+  g,
+  response="projected_leaf_area_m2",
+  degree=2,
+  random_degree=1,
+  correlation="ar1",
+  variance="power"
+)
+growth_mixed_diagnose(m)
+```
+
+## 158. Flexible trajectory
+
+```{r eval=FALSE}
+s <- growth_smooth(
+  d,
+  time="day",
+  response="projected_leaf_area_m2",
+  group="water_regime",
+  method="smooth_spline",
+  cv=TRUE
+)
+```
+
+## 159. Rates and landmarks
+
+```{r eval=FALSE}
+p <- growth_smooth_predict(s, n=200)
+r <- growth_derivative(s, order=1, time=p$time)
+a <- growth_acceleration(s, time=p$time)
+tr <- growth_smooth_traits(s, n=500)
+```
+
+## 160. Functional variation
+
+```{r eval=FALSE}
+fp <- growth_fpca(
+  d,
+  time="day",
+  response="projected_leaf_area_m2",
+  unit="plant_id",
+  group="water_regime",
+  npc=2
+)
+```
+
+# Part XXII. Final validation checklist
+
+## 161. Experimental validity
+
+- [ ] Persistent unit identified.
+- [ ] Treatment assignment level identified.
+- [ ] Destructive versus repeated sampling declared.
+- [ ] Subsamples not counted as treatment replicates.
+- [ ] Time scale biologically meaningful.
+
+## 162. Mixed-model validity
+
+- [ ] Fixed time degree justified.
+- [ ] Random structure supported.
+- [ ] Correlation structure appropriate to spacing.
+- [ ] Variance structure inspected.
+- [ ] ML/REML used for the correct comparison.
+- [ ] Within-unit residual dependence inspected.
+
+## 163. Smooth validity
+
+- [ ] Raw observations shown.
+- [ ] Smoothing method justified.
+- [ ] Tuning sensitivity considered.
+- [ ] Derivatives interpreted inside support.
+- [ ] Boundary landmarks treated cautiously.
+
+## 164. SCAM validity
+
+- [ ] Shape restriction biologically justified.
+- [ ] Analysis window compatible with restriction.
+- [ ] Unconstrained benchmark inspected.
+- [ ] Constraint reported explicitly.
+
+## 165. FPCA validity
+
+- [ ] Persistent functional unit correct.
+- [ ] Common support or sparse method justified.
+- [ ] Reconstruction method reported.
+- [ ] PVE and component shape inspected.
+- [ ] Eigenfunction sign ambiguity respected.
+
+## 166. MANOVA validity
+
+- [ ] Common observed time grid confirmed.
+- [ ] Degree low relative to information.
+- [ ] Multivariate test chosen transparently.
+- [ ] Component ANOVAs treated as secondary.
+- [ ] Block limitations acknowledged.
+
+# 167. Final perspective
+
+The 0.3.0 release changes `agriGrowthFlow` from a package centered on classical and parametric growth into a broader trajectory-analysis workflow. Its central safeguard remains unchanged: sophisticated time-course statistics are useful only when the biological and experimental unit is correct. Mixed models, smooths, shape constraints, FPCA, and MANOVA are therefore implemented as complementary tools around the same design-aware core rather than as disconnected functions.
+
+# References

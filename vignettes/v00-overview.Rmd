@@ -1,0 +1,275 @@
+---
+title: "agriGrowthFlow 0.1.0: Overview and Design-First Foundations"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 0.1.0: Overview and Design-First Foundations}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(agriGrowthFlow)
+```
+
+# Purpose of this vignette
+
+Plant growth analysis is often introduced as a collection of formulas. That is useful, but incomplete. The same formula can be scientifically appropriate in one experiment and misleading in another because the statistical meaning of a growth trajectory depends on how plants, plots, harvests and repeated observations were generated.
+
+`agriGrowthFlow` therefore begins with the experimental structure. Version 0.1.0 implements the foundational layer: data declaration, design validation, exploratory trajectories, classical growth quantities, biomass partitioning and allometry. Later releases will build nonlinear, smooth, mixed, bootstrap and Bayesian models on this foundation.
+
+The key rule is:
+
+> Define the experimental unit and the sampling process before calculating rates.
+
+Keuls and Garretsen emphasized that a valid comparison of growth curves requires a curve for each experimental unit. Non-destructive observations can repeatedly measure the same plant or a systematic sample, whereas destructive harvests use different plant material at successive dates and must preserve a stable higher-level unit such as a plot [@KeulsGarretsen1982].
+
+# 1. The object model
+
+`growth_data()` does not transform the data. It records the meaning of columns.
+
+```{r}
+d <- growth_example_data("maize_destructive")
+head(d)
+
+g <- growth_data(
+  d,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  treatment = "nitrogen",
+  block = "block",
+  total_mass = "total_mass_g",
+  leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g",
+  root_mass = "root_mass_g",
+  stem_mass = "stem_mass_g",
+  reproductive_mass = "reproductive_mass_g",
+  ground_area = "ground_area_m2",
+  units = list(
+    time = "day",
+    total_mass = "g per sampled quadrat",
+    leaf_area = "m2 per sampled quadrat",
+    ground_area = "m2"
+  )
+)
+
+g
+```
+
+The object retains the original data and a role map. This avoids hidden guessing later in the workflow.
+
+# 2. Destructive and repeated sampling are different data-generating processes
+
+The package includes a second dataset for non-destructive repeated observation.
+
+```{r}
+r <- growth_example_data("bean_repeated")
+head(r)
+
+gr <- growth_data(
+  r,
+  time = "day",
+  sampling = "repeated",
+  plant = "plant_id",
+  experimental_unit = "plant_id",
+  treatment = "water_regime",
+  block = "block",
+  leaf_area = "projected_leaf_area_m2"
+)
+
+growth_validate(gr)
+```
+
+In this example, the same `plant_id` occurs at several dates. The plant is a genuine repeated subject. In the maize destructive dataset, `harvest_unit` changes at every harvest; the stable `plot_id` is what connects harvest dates scientifically.
+
+Treating the harvested quadrats as repeated subjects would create a fictitious within-unit correlation structure.
+
+# 3. Validation before calculation
+
+```{r}
+v <- growth_validate(g)
+v
+```
+
+Validation inspects detectable structural issues such as:
+
+- missing or non-ordered time information;
+- insufficient temporal support;
+- negative or zero values that make ratios or logarithms undefined;
+- repeated sampling without a stable subject;
+- destructive sampling without a stable plot or experimental unit;
+- treatment or block changes within a declared experimental unit;
+- conflicts between the declared design and sampling mechanism.
+
+A clean validation result is not proof that the experiment was correctly randomized or sampled. It means that no contradiction detectable from the supplied object was found.
+
+# 4. Ask the package for a plan
+
+```{r}
+growth_plan(g)
+```
+
+The plan is intentionally conservative. It points out which classical quantities are supported by the declared measurements and where interpretation depends on additional biological assumptions.
+
+# 5. Plot before deriving rates
+
+```{r fig.width=7, fig.height=4.5}
+growth_plot(g, response = "total_mass_g", group = "nitrogen", summary = "both")
+```
+
+The raw observations remain visible. Summary lines should not replace inspection of within-treatment variability.
+
+A logarithmic display can reveal early proportional growth patterns that are compressed on the arithmetic scale, an issue emphasized in classical plant growth analysis [@Hunt1990].
+
+```{r fig.width=7, fig.height=4.5}
+growth_plot(g, response = "total_mass_g", group = "nitrogen", summary = "both", log_y = TRUE)
+```
+
+# 6. Classical growth quantities
+
+The foundational definitions implemented in version 0.1.0 include the following.
+
+For total dry mass $W$ over an interval $t_1$ to $t_2$,
+
+$$
+AGR = \frac{W_2-W_1}{t_2-t_1}.
+$$
+
+Relative growth rate is
+
+$$
+RGR = \frac{\ln W_2-\ln W_1}{t_2-t_1}.
+$$
+
+Hunt describes RGR as growth per unit existing size, which makes it a proportional rather than absolute rate [@Hunt1990].
+
+For leaf area $A$,
+
+$$
+LAR = \frac{A}{W}, \qquad
+SLA = \frac{A}{W_L}, \qquad
+LMR = \frac{W_L}{W},
+$$
+
+so that
+
+$$
+LAR = SLA \times LMR.
+$$
+
+This identity is useful as a conceptual decomposition and a numerical check.
+
+The classical interval estimate of net assimilation rate is
+
+$$
+NAR =
+\frac{W_2-W_1}{t_2-t_1}
+\frac{\ln A_2-\ln A_1}{A_2-A_1}.
+$$
+
+If leaf area is effectively unchanged over the interval, `growth_nar()` uses the mathematical limit $AGR/A$ rather than evaluating a zero-over-zero expression.
+
+# 7. Integrated interval analysis
+
+```{r}
+idx <- growth_indices(g)
+idx
+```
+
+The important operation occurs before the formulas: the two sampled quadrats within a `plot_id × day` combination are averaged first. Consecutive intervals are then formed within the stable plot. This respects the serial destructive design much better than arbitrarily pairing different harvested quadrats.
+
+Inspect the aggregated data if necessary:
+
+```{r}
+head(idx$aggregated)
+```
+
+Inspect derived intervals:
+
+```{r}
+head(idx$intervals)
+```
+
+# 8. Canopy quantities
+
+Leaf area index is
+
+$$
+LAI = \frac{\text{leaf area}}{\text{ground area}}.
+$$
+
+Leaf area duration over an interval is approximated by the trapezoidal area under the LAI-time curve:
+
+$$
+LAD_{1,2} = \frac{LAI_1+LAI_2}{2}(t_2-t_1).
+$$
+
+```{r}
+growth_lai(leaf_area = 1.25, ground_area = 0.25)
+growth_lad(lai = c(0.5, 1.2, 2.0, 1.7), time = c(14, 28, 42, 56))
+```
+
+LAD is an exposure-duration summary. Equal areas under an LAI curve are not necessarily physiologically equivalent under different radiation, temperature or canopy-age conditions, so the index should not be interpreted as a mechanistic carbon-balance model [@Hunt1990].
+
+# 9. Biomass partitioning
+
+```{r}
+p <- growth_partition(g)
+head(p)
+```
+
+By default, component fractions are divided by declared total mass. They are not silently renormalized to sum to one. This is important because unmeasured organs, sampling losses or analytical inconsistencies can otherwise disappear from the report.
+
+The `closure` column is the ratio of the supplied component sum to total mass. `unallocated_fraction` makes the difference visible.
+
+# 10. Allometry
+
+Allometry asks how one biological quantity scales with another. The version 0.1.0 implementation fits
+
+$$
+y = a x^k
+$$
+
+through the log-log regression
+
+$$
+\ln y = \ln a + k\ln x.
+$$
+
+```{r}
+s <- growth_example_data("soybean_partition")
+a <- growth_allometry(s, x = "root_mass_g", y = "stem_mass_g", group = "cultivar")
+a
+```
+
+The exponent $k$ is interpretable only under the chosen regression model. Ordinary least squares treats `x` as the explanatory predictor. It is not equivalent to standardized major-axis regression and should not be presented as such.
+
+# 11. What version 0.1.0 deliberately does not do
+
+The package does not yet choose a logistic, Gompertz, Richards or other nonlinear curve. It does not yet fit nonlinear mixed models, estimate spline derivatives, bootstrap the complete design, or perform Bayesian inference. Those capabilities belong to later modules.
+
+This separation is intentional. Sophisticated modelling cannot repair an incorrect experimental-unit definition.
+
+# 12. Reporting checklist
+
+A defensible report should state:
+
+1. whether sampling was destructive or repeated;
+2. what the experimental unit was;
+3. what was measured at each harvest;
+4. whether masses and areas refer to plants, quadrats or ground area;
+5. how within-unit harvest replicates were summarized;
+6. which intervals were used;
+7. units for every growth quantity;
+8. whether leaf area decreased, remained constant or increased;
+9. whether component fractions closed to total biomass;
+10. which results are descriptive and which are inferential.
+
+# References

@@ -1,0 +1,596 @@
+---
+title: "agriGrowthFlow 0.3.0: Longitudinal Mixed-Effects Growth Models"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 0.3.0: Longitudinal Mixed-Effects Growth Models}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+
+# 1. Why a mixed-effects layer is necessary
+
+Plant growth experiments often contain several levels of variation at the same time. Repeated measurements are nested within a plant, pot, plot, tree, or other persistent experimental unit. Treatment is usually assigned at a higher level than the repeated observation. Blocks may represent another design factor. A model that ignores this hierarchy can assign serial or unit-to-unit variation to the wrong source.
+
+The central model in this vignette can be written as
+
+$$
+y_{ij} = \mathbf{x}_{ij}^{\mathsf T}\boldsymbol\beta + \mathbf{z}_{ij}^{\mathsf T}\mathbf{b}_i + \varepsilon_{ij},
+$$
+
+where $i$ indexes a persistent unit and $j$ indexes observation time. Fixed effects $\boldsymbol\beta$ describe population-level growth. Random effects $\mathbf{b}_i$ describe persistent-unit departures from that population curve. Residuals $\varepsilon_{ij}$ represent remaining within-unit variation. Mixed-effects models therefore partition variability rather than pretending every row is independent [@PinheiroBates2000; @Mirman2014].
+
+This package does not use a mixed model simply because repeated measurements are present. The experimental unit, the sampling mechanism, the time scale, treatment assignment, and plausible covariance structure must first be declared.
+
+# 2. Learning objectives
+
+After completing this vignette you should be able to:
+
+1. distinguish a repeated plant from a destructive subsample;
+2. identify the persistent experimental unit;
+3. construct fixed polynomial time effects without confusing them with mechanistic growth equations;
+4. choose random-intercept and random-slope structures deliberately;
+5. decide between discrete AR(1) and continuous-time AR(1);
+6. represent heterogeneous residual variance;
+7. distinguish ML from REML for the purpose at hand;
+8. diagnose residual structure within units;
+9. report mixed growth models without overinterpreting polynomial coefficients;
+10. explain when a nonlinear mixed model, rather than the current 0.3.0 polynomial mixed layer, is required.
+
+# 3. The repeated bean teaching data
+
+The teaching data are simulated and frozen for software testing. They are not field evidence.
+
+```{r}
+bean <- growth_example_data("bean_repeated")
+dim(bean)
+head(bean)
+with(bean, table(water_regime, block))
+length(unique(bean$plant_id))
+```
+
+Each plant has repeated observations at six times. The same `plant_id` persists across time.
+
+```{r}
+with(bean, table(table(plant_id)))
+```
+
+A minimal declaration is:
+
+```{r}
+gbean <- growth_data(
+  bean,
+  time = "day",
+  sampling = "repeated",
+  experimental_unit = "plant_id",
+  plant = "plant_id",
+  block = "block",
+  treatment = "water_regime",
+  leaf_area = "projected_leaf_area_m2",
+  units = list(
+    day = "d",
+    projected_leaf_area_m2 = "m2"
+  )
+)
+
+growth_validate(gbean)
+growth_plan(gbean)
+```
+
+The important declaration is not the name of the column. It is the role of that column.
+
+# 4. Why destructive data require different handling
+
+Keuls and Garretsen emphasized that a growth curve must belong to a valid experimental unit. With destructive harvests, the plants measured at successive dates are different biological observations, so a changing plant identifier cannot be used as though it were a repeated subject [@KeulsGarretsen1982].
+
+Load the maize example:
+
+```{r}
+maize <- growth_example_data("maize_destructive")
+head(maize)
+```
+
+Declare the persistent plot:
+
+```{r}
+gmaize <- growth_data(
+  maize,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  plot = "plot_id",
+  block = "block",
+  treatment = "nitrogen",
+  total_mass = "total_mass_g"
+)
+```
+
+When `growth_mixed()` receives this object, destructive subsamples are averaged within persistent unit and time before model fitting. This does not make the harvested plants repeated measurements. It defines the plot-level trajectory from its time-specific destructive samples.
+
+# 5. Start with raw trajectories
+
+A mixed model should not be the first look at the data.
+
+```{r}
+growth_plot(gbean, response = "height_cm")
+```
+
+Useful questions before modeling are:
+
+- Do individual curves rise together?
+- Do some plants systematically begin higher?
+- Do slopes vary among plants?
+- Does treatment separation appear mainly early or late?
+- Does residual spread increase with plant size?
+- Are observations equally spaced in time?
+- Are there abrupt events that a smooth polynomial cannot represent?
+
+# 6. The orthogonal polynomial time basis
+
+`growth_mixed()` uses orthogonal polynomial time terms in version 0.3.0. For degree two, the fixed mean trajectory can be represented as
+
+$$
+E(Y_{ij}) = \beta_0 + \beta_1 P_1(t_{ij}) + \beta_2 P_2(t_{ij}),
+$$
+
+where $P_1$ and $P_2$ are orthogonal over the observed time values. Orthogonality reduces correlation among polynomial basis terms but does not turn the coefficients into direct biological rates.
+
+A treatment interaction expands the model to
+
+$$
+E(Y_{ij}) = \beta_0 + \beta_1P_1(t_{ij}) + \beta_2P_2(t_{ij})
++ \gamma G_i
++ \delta_1G_iP_1(t_{ij})
++ \delta_2G_iP_2(t_{ij}).
+$$
+
+The interaction asks whether trajectory shape differs between treatment groups.
+
+# 7. Fit a basic mixed growth model
+
+`nlme` is optional. The example is guarded so that the vignette remains buildable when the suggested package is absent.
+
+```{r}
+if (requireNamespace("nlme", quietly = TRUE)) {
+  m0 <- growth_mixed(
+    gbean,
+    response = "height_cm",
+    degree = 2,
+    random_degree = 1,
+    correlation = "none",
+    variance = "none",
+    method = "REML"
+  )
+  m0
+}
+```
+
+The default random structure in this example permits each plant to differ in its overall level and linear time tendency. The fixed block term accounts for the declared block factor without pretending blocks are repeated subjects.
+
+# 8. Random intercept only
+
+A random-intercept model assumes plants differ in overall level but share the same polynomial shape after treatment effects are accounted for.
+
+```{r}
+if (requireNamespace("nlme", quietly = TRUE)) {
+  m_ri <- growth_mixed(
+    gbean,
+    response = "height_cm",
+    degree = 2,
+    random_degree = 0
+  )
+}
+```
+
+Scientifically, this can be too restrictive if plants clearly differ in rates of change. A simpler random structure should be chosen because it is supported by design and information, not merely because a more complete structure produces a difficult optimization.
+
+# 9. Random slope
+
+```{r}
+if (requireNamespace("nlme", quietly = TRUE)) {
+  m_rs <- growth_mixed(
+    gbean,
+    response = "height_cm",
+    degree = 2,
+    random_degree = 1
+  )
+}
+```
+
+Random slopes allow unit-specific growth tendencies. The shrinkage property of mixed models means these unit effects are informed jointly by individual and population information [@Mirman2014]. This often stabilizes estimates relative to fitting completely independent curves to every plant.
+
+# 10. Random curvature
+
+A random quadratic component can be requested only when enough observations support it.
+
+```{r eval=FALSE}
+m_rc <- growth_mixed(
+  gbean,
+  response = "height_cm",
+  degree = 2,
+  random_degree = 2
+)
+```
+
+A maximal random structure is not automatically estimable in a small plant experiment. Check the number of repeated times, number of units, convergence, covariance estimates, and scientific necessity.
+
+# 11. Discrete AR(1)
+
+For equally spaced integer time, `correlation = "ar1"` represents
+
+$$
+\operatorname{Cor}(\varepsilon_{ij},\varepsilon_{ik}) = \rho^{|j-k|}
+$$
+
+when the integer time index represents equal observation steps.
+
+```{r}
+if (requireNamespace("nlme", quietly = TRUE)) {
+  m_ar1 <- growth_mixed(
+    gbean,
+    response = "height_cm",
+    degree = 2,
+    random_degree = 1,
+    correlation = "ar1",
+    method = "REML"
+  )
+}
+```
+
+The package rejects noninteger time for this option because silently using discrete AR(1) on irregular continuous time changes the meaning of the correlation.
+
+# 12. Continuous-time AR(1)
+
+For irregular time, use continuous autoregression:
+
+$$
+\operatorname{Cor}(\varepsilon(t),\varepsilon(s)) = \rho^{|t-s|}
+$$
+
+under the `nlme::corCAR1` parameterization.
+
+```{r}
+irr <- growth_example_data("soybean_irregular")
+head(irr)
+```
+
+```{r}
+if (requireNamespace("nlme", quietly = TRUE)) {
+  m_car1 <- growth_mixed(
+    irr,
+    time = "day",
+    response = "height_cm",
+    unit = "plant_id",
+    group = "water_regime",
+    block = "block",
+    degree = 2,
+    random_degree = 1,
+    correlation = "car1"
+  )
+}
+```
+
+# 13. Why AR(1) is not a decoration
+
+Adding correlation changes the covariance model, effective information, and standard errors. It should be supported by residual patterns, sampling interval, experimental process, and comparison of plausible covariance structures. Do not add AR(1) only because a residual test has a small p-value.
+
+# 14. Heterogeneous variance with growth
+
+Plant size often increases over time, and measurement variance can increase with the mean. A power variance function is one option:
+
+```{r}
+if (requireNamespace("nlme", quietly = TRUE)) {
+  m_power <- growth_mixed(
+    gbean,
+    response = "projected_leaf_area_m2",
+    degree = 2,
+    random_degree = 1,
+    variance = "power"
+  )
+}
+```
+
+The variance function is part of the model. It should be reported.
+
+# 15. Exponential variance
+
+```{r}
+if (requireNamespace("nlme", quietly = TRUE)) {
+  m_expvar <- tryCatch(
+    growth_mixed(
+      gbean,
+      response = "projected_leaf_area_m2",
+      degree = 2,
+      variance = "exponential",
+      control = list(maxIter = 200, msMaxIter = 200)
+    ),
+    error = function(e) {
+      message("Exponential variance did not converge: ", conditionMessage(e), " (illustrative only)")
+      NULL
+    }
+  )
+  if (!is.null(m_expvar)) print(m_expvar)
+}
+```
+
+Compare whether the fitted residual spread is scientifically plausible. A better AIC alone is not enough.
+
+# 16. Group-specific residual variance
+
+Water regimes may differ in residual dispersion.
+
+```{r}
+if (requireNamespace("nlme", quietly = TRUE)) {
+  m_gvar <- growth_mixed(
+    gbean,
+    response = "height_cm",
+    degree = 2,
+    variance = "group"
+  )
+}
+```
+
+This model estimates relative residual variances by treatment group.
+
+# 17. Time-specific residual variance
+
+```{r eval=FALSE}
+m_tvar <- growth_mixed(
+  gbean,
+  response = "height_cm",
+  degree = 2,
+  variance = "time"
+)
+```
+
+This is parameter hungry. Six measurement times imply multiple residual variance levels. Use it when replication is sufficient and heteroscedasticity genuinely follows measurement occasion.
+
+# 18. ML versus REML
+
+For a fixed-effects structure held constant, REML is often preferred for estimation of variance components. For comparison of models with different fixed-effects structures, ML is typically required. Do not compare REML likelihoods across different fixed-effect specifications as though they were ordinary likelihood comparisons [@PinheiroBates2000].
+
+# 19. Model comparison workflow
+
+The package intentionally does not contain an automatic `growth_mixed_select()` that scans all covariance structures and returns a winner. A transparent workflow is preferable:
+
+```{r eval=FALSE}
+m_none <- growth_mixed(gbean, response="height_cm", degree=2,
+                       random_degree=1, correlation="none", method="ML")
+m_ar1  <- growth_mixed(gbean, response="height_cm", degree=2,
+                       random_degree=1, correlation="ar1", method="ML")
+
+AIC(m_none$fit, m_ar1$fit)
+```
+
+Then inspect residuals and the estimated covariance parameters.
+
+# 20. Diagnostics
+
+```{r}
+if (requireNamespace("nlme", quietly = TRUE)) {
+  dz <- growth_mixed_diagnose(m0)
+  dz
+}
+```
+
+The diagnostics include normalized residual dispersion and lag-1 correlation calculated within persistent units. The package deliberately avoids correlating the final residual of one plant with the first residual of another plant.
+
+# 21. Residual normality
+
+A Shapiro-Wilk p-value is supplied only as a descriptive diagnostic when sample size permits it. It is not a gate that makes a mixed model valid or invalid. Inspect residual distributions and fitted-versus-residual patterns together.
+
+# 22. Within-unit lag-1 correlation
+
+The median within-unit lag-1 residual correlation summarizes remaining local dependence. A high value after fitting an AR structure may signal model inadequacy, but its interpretation also depends on the number of observations per unit.
+
+# 23. Fixed-effect coefficients
+
+Orthogonal-polynomial coefficients should be interpreted as components of trajectory shape, not as kilograms per day or centimeters per day. To communicate biological meaning, predict curves or calculate derived contrasts on the original time scale.
+
+# 24. Treatment effects
+
+A treatment by polynomial-time interaction indicates that the trajectory differs in one or more basis components. It does not by itself identify the exact day at which treatments differ. Pointwise testing at every day can introduce multiplicity and thresholding problems. Prefer model-based contrasts tied to biological questions.
+
+# 25. Block effects
+
+The 0.3.0 implementation uses a declared block as a fixed nuisance effect. This is suitable for the compact teaching API but does not cover every blocked or split-plot design. When block needs a random or nested structure beyond the persistent-unit random effect, fit the lower-level `nlme` object directly or use a more general modeling engine.
+
+# 26. Missing repeated observations
+
+Mixed models can use unbalanced longitudinal data under appropriate missing-data assumptions. However, missingness caused by plant death, harvest, disease, or treatment-dependent dropout may be informative. Software cannot infer that mechanism from `NA` values.
+
+# 27. Unequal observation times
+
+Use the actual time variable. Do not replace day 3, day 9, and day 28 with equally spaced labels 1, 2, and 3 unless those labels are scientifically intended.
+
+# 28. Repeated phenotyping and sensor data
+
+Repeated image-derived traits such as projected canopy area may contain large numbers of time points. Polynomial degree should remain small enough to be interpretable. For highly resolved trajectories, the flexible smoothing and functional modules introduced in the next vignettes are often more appropriate.
+
+# 29. Destructive serial harvests
+
+A destructive plot-level series can be modeled with plot random effects after time-specific subsamples have been reduced to the persistent plot. The interpretation differs from repeatedly measuring the same plant. State this distinction in Methods.
+
+# 30. A destructive example
+
+```{r}
+if (requireNamespace("nlme", quietly = TRUE)) {
+  mm <- growth_mixed(
+    gmaize,
+    degree = 2,
+    random_degree = 0,
+    correlation = "ar1",
+    method = "REML"
+  )
+  nrow(mm$data)
+  mm$aggregation
+}
+```
+
+The original 144 subsample rows are reduced to 72 persistent plot by harvest summaries before longitudinal fitting.
+
+# 31. Why this aggregation is deliberate
+
+The reduction prevents artificial replication. It does not claim that within-plot destructive subsample variance is irrelevant. If within-plot sampling error must be modeled explicitly, a deeper hierarchical model is needed.
+
+# 32. Centering and intercept meaning
+
+Orthogonal polynomials generated by R are data-dependent basis functions. The intercept is a mean-level component, not necessarily the biological response at day zero. If a baseline intercept has a direct scientific interpretation, a raw centered polynomial or other basis may be preferable in a custom model.
+
+# 33. Degree selection
+
+Degree one asks for approximately linear change. Degree two allows one bend. Degree three allows more shape but can become difficult to interpret. A higher degree should not be selected merely because it reduces residual error.
+
+# 34. What version 0.3.0 does not do
+
+The public mixed layer is polynomial and Gaussian. It does not yet fit Logistic, Gompertz, Richards, or beta nonlinear mixed-effects curves. It does not fit generalized mixed models for counts or proportions. It does not automate random-effect selection. These exclusions are intentional.
+
+# 35. Relationship to version 0.2.0 nonlinear curves
+
+The 0.2.0 nonlinear layer is useful for biologically interpretable mean trajectories and derived traits. Ordinary NLS cannot replace a longitudinal covariance model. The 0.3.0 mixed layer solves a different problem: dependence and hierarchical trajectory variation.
+
+# 36. A two-stage exploratory strategy
+
+One defensible exploratory sequence is:
+
+1. validate the design;
+2. visualize unit trajectories;
+3. use parametric curves to understand plausible biological shape;
+4. use a mixed polynomial model for treatment inference if the polynomial representation is adequate;
+5. compare conclusions with flexible smooths;
+6. reserve nonlinear mixed effects for a later engine when biologically interpretable random curve parameters are essential.
+
+# 37. Reproducible extraction
+
+```{r eval=FALSE}
+fixef(m0$fit)
+VarCorr(m0$fit)
+intervals(m0$fit)
+```
+
+These functions come from `nlme` and remain accessible because `growth_mixed()` stores the original engine object.
+
+# 38. Reporting template for Methods
+
+A suitable Methods statement should identify all hierarchy levels. For example:
+
+> Growth trajectories were analyzed with a linear mixed-effects model using orthogonal polynomial functions of time. Plant was treated as the persistent random observational unit, with random intercept and linear time component. Water regime and its interaction with time were modeled as fixed effects, and block was included as a fixed design factor. Residual correlation was represented by a continuous-time AR(1) structure when observation intervals were irregular. The covariance specification was assessed using residual diagnostics and information criteria together with biological plausibility.
+
+Only report structures actually fitted.
+
+# 39. Reporting template for Results
+
+A results paragraph should emphasize trajectory differences and uncertainty rather than only coefficient p-values:
+
+> The water regimes differed in the shape of canopy development, with the largest separation occurring during the rapid expansion period. Persistent plants varied in both overall size and linear growth tendency. Residual serial association was reduced after the continuous-time correlation structure was introduced, while treatment conclusions were qualitatively stable.
+
+Insert actual estimates and intervals from the real analysis.
+
+# 40. Common error: plant as fixed treatment
+
+Plant identity is usually an observational grouping factor, not a treatment. Adding dozens of plant dummy variables changes the estimand and loses the partial-pooling interpretation of random effects.
+
+# 41. Common error: every row as independent
+
+Ordinary `lm()` on repeated measurements can produce standard errors that ignore within-unit dependence. The direction of distortion is not universally predictable.
+
+# 42. Common error: automatic AR(1)
+
+Do not attach AR(1) to every growth experiment. Random effects can already explain substantial within-unit dependence. Residual correlation should represent remaining serial structure.
+
+# 43. Common error: treating time as a categorical nuisance only
+
+A factor-time analysis can be useful, especially with few scheduled harvests, but it no longer estimates a continuous trajectory. Choose the representation according to the scientific question.
+
+# 44. Common error: interpreting orthogonal coefficients as raw slopes
+
+A `P1` coefficient is not a simple original-scale slope. Plot predicted trajectories or transform to biologically meaningful contrasts.
+
+# 45. Common error: comparing REML models with different fixed effects
+
+Use ML when fixed-effect structures differ. Refit the selected fixed structure with REML if variance-component estimation is the final goal.
+
+# 46. Common error: ignoring treatment assignment
+
+If treatment is assigned to plots, individual leaves or pixels are not independent treatment replicates. The mixed model cannot repair pseudoreplication created by an incorrect experimental unit.
+
+# 47. Common error: silent interpolation
+
+`growth_mixed()` uses the observations available to each persistent unit. It does not invent missing measurements. The functional module has separate rules for reconstruction.
+
+# 48. Common error: p-value-only covariance selection
+
+Choose covariance models using design, residual pattern, prediction behavior, stability, and information criteria. A single test is insufficient.
+
+# 49. Checklist before fitting
+
+- [ ] Persistent unit identified.
+- [ ] Treatment assignment level identified.
+- [ ] Repeated versus destructive sampling declared.
+- [ ] Actual time scale retained.
+- [ ] Raw unit trajectories inspected.
+- [ ] Missingness pattern inspected.
+- [ ] Fixed-effect degree justified.
+- [ ] Random-effect complexity justified.
+- [ ] Correlation structure justified.
+- [ ] Residual variance structure justified.
+- [ ] ML versus REML chosen for the intended comparison.
+
+# 50. Checklist after fitting
+
+- [ ] Convergence assessed.
+- [ ] Variance components plausible.
+- [ ] Fixed effects interpreted on the curve scale.
+- [ ] Residual spread inspected.
+- [ ] Within-unit residual correlation inspected.
+- [ ] Sensitivity to covariance specification considered.
+- [ ] Treatment conclusions not reduced to isolated p-values.
+- [ ] Methods state the exact hierarchy and covariance structure.
+
+# 51. Compact complete script
+
+```{r eval=FALSE}
+d <- growth_example_data("bean_repeated")
+g <- growth_data(
+  d,
+  time = "day",
+  sampling = "repeated",
+  experimental_unit = "plant_id",
+  plant = "plant_id",
+  block = "block",
+  treatment = "water_regime",
+  leaf_area = "projected_leaf_area_m2"
+)
+
+growth_validate(g)
+growth_plan(g)
+
+m <- growth_mixed(
+  g,
+  response = "projected_leaf_area_m2",
+  degree = 2,
+  random_degree = 1,
+  correlation = "ar1",
+  variance = "power",
+  method = "REML"
+)
+
+growth_mixed_diagnose(m)
+```
+
+# 52. Final perspective
+
+The main contribution of the 0.3.0 mixed layer is not an additional regression syntax. It is preservation of the experimental hierarchy. A biologically attractive growth curve is not enough when observations are clustered. Conversely, a sophisticated covariance structure cannot rescue an invalid unit of replication. The two aspects must be designed together.
+
+# References

@@ -1,0 +1,615 @@
+---
+title: "agriGrowthFlow Foundations-to-Advanced Tutorial: From Experimental Design to Interpretable Plant Growth Indices"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow Foundations-to-Advanced Tutorial: From Experimental Design to Interpretable Plant Growth Indices}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(agriGrowthFlow)
+```
+
+# 1. Why this tutorial exists
+
+Plant growth data sit at the intersection of experimental design, plant physiology, longitudinal measurement and mathematical description. A workflow that begins with a preferred curve or a preferred p-value can miss the most important question: what biological unit generated the observations?
+
+This tutorial develops the version 0.1.0 workflow from first principles. It uses three simulated agronomic datasets to show destructive harvests, repeated non-destructive measurements and biomass allocation. The datasets are frozen for teaching and software testing. Their numerical values must not be presented as empirical field evidence.
+
+The scientific foundations are drawn from classical plant growth analysis [@Hunt1990], design-aware growth-curve analysis in plant breeding [@KeulsGarretsen1982], later work connecting classical and functional approaches [@Poorter1989], regression smoothers for growth-rate estimation [@ShipleyHunt1996], and methods for known biomass-loss events [@AntenAckerly2001]. Only the methods implemented in 0.1.0 are executed here; later techniques are discussed as extensions rather than simulated as if they already existed.
+
+# Part I. Define the scientific question before the object
+
+## 2. Questions that sound similar but are statistically different
+
+Consider four questions:
+
+1. How many grams per day did crop biomass increase?
+2. How rapidly did biomass increase relative to existing biomass?
+3. How much dry matter accumulated per unit leaf area?
+4. Did a cultivar allocate proportionally more biomass to roots as plants became larger?
+
+These correspond to AGR, RGR, NAR and allometric/partitioning analyses. They use overlapping measurements but answer different questions.
+
+Before calculating anything, write down:
+
+- the response quantity;
+- its physical unit;
+- the time scale;
+- the experimental unit;
+- whether the same biological unit is observed repeatedly;
+- whether sampling removes plant material;
+- whether the quantity is per plant, per quadrat or per ground area;
+- which treatment comparisons are planned.
+
+## 3. Load the serial-destructive teaching data
+
+```{r}
+maize <- growth_example_data("maize_destructive")
+dim(maize)
+head(maize)
+```
+
+The experiment has three nitrogen treatments in four blocks. At each of six harvest dates, two independent quadrats are sampled within each stable treatment-by-block plot. The `harvest_unit` changes with date; `plot_id` persists.
+
+```{r}
+with(maize, table(nitrogen, block))
+with(maize, table(day))
+```
+
+## 4. Declare roles
+
+```{r}
+g <- growth_data(
+  maize,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  plot = "plot_id",
+  block = "block",
+  treatment = "nitrogen",
+  total_mass = "total_mass_g",
+  leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g",
+  root_mass = "root_mass_g",
+  stem_mass = "stem_mass_g",
+  reproductive_mass = "reproductive_mass_g",
+  ground_area = "ground_area_m2",
+  units = list(
+    day = "days after emergence",
+    total_mass_g = "g dry mass per 0.25 m2 sampled quadrat",
+    leaf_area_m2 = "m2 leaf area per 0.25 m2 sampled quadrat",
+    ground_area_m2 = "m2"
+  ),
+  metadata = list(dataset_status = "simulated teaching data")
+)
+g
+```
+
+Nothing has been averaged or modelled yet.
+
+# Part II. Protect the design
+
+## 5. Declare the block structure
+
+```{r}
+des <- growth_design(g, design = "rcbd")
+des
+```
+
+The RCBD label records the declared treatment/block structure. It does not reconstruct randomization. A manuscript should still describe how treatments were allocated within blocks.
+
+## 6. Validate
+
+```{r}
+val <- growth_validate(des)
+val
+```
+
+The validator is intentionally not a ritual assumption checklist. It focuses on contradictions that would make downstream growth calculations structurally questionable.
+
+### 6.1 Why destructive harvests need a stable higher-level unit
+
+In a destructive experiment, a plant harvested on day 28 cannot be the same plant as one harvested on day 42. Keuls and Garretsen argued that the growth curve must be associated with the experimental plot, with different random plant samples supplying each date [@KeulsGarretsen1982].
+
+That principle leads to the following sequence:
+
+```text
+sampled quadrats or plants
+        ↓
+mean within stable plot × harvest date
+        ↓
+plot-level sequence of harvest means
+        ↓
+interval growth quantities
+        ↓
+treatment-level summary or inferential model
+```
+
+Do not reverse the first two steps.
+
+## 7. Obtain the analysis plan
+
+```{r}
+plan <- growth_plan(des)
+plan
+```
+
+The plan reports what is currently supported by the declared variables. It also reminds the analyst that curve-shape inference needs more temporal information than a single interval.
+
+# Part III. Visualize first
+
+## 8. Raw and summarized biomass trajectories
+
+```{r fig.width=8, fig.height=5}
+growth_plot(g, response = "total_mass_g", group = "nitrogen", summary = "both")
+```
+
+This plot should be read before any treatment ranking is attempted. Ask:
+
+- Are early differences small relative to late differences?
+- Does variability increase with biomass?
+- Is a plateau supported within the observed period?
+- Are there unexpected declines?
+- Do any plots show trajectories inconsistent with the rest of the treatment?
+
+Version 0.1.0 does not automatically remove outliers. A surprising point can reflect data entry, sampling variation, damage, phenology or true biological heterogeneity.
+
+## 9. Logarithmic display
+
+```{r fig.width=8, fig.height=5}
+growth_plot(g, response = "total_mass_g", group = "nitrogen", summary = "both", log_y = TRUE)
+```
+
+A log scale changes the visual question. It emphasizes proportional change and can make early growth visible when absolute biomass spans orders of magnitude. Hunt used this logic to motivate growth-rate concepts [@Hunt1990].
+
+# Part IV. Classical rates from first principles
+
+## 10. AGR
+
+Take a simple interval:
+
+```{r}
+growth_agr(w1 = 12, w2 = 28, t1 = 14, t2 = 28)
+```
+
+The calculation is
+
+$$
+AGR = \frac{28-12}{28-14}.
+$$
+
+If the masses are grams per sampled quadrat and time is days, the unit is g quadrat$^{-1}$ day$^{-1}$.
+
+### Interpretation
+
+AGR answers: how much absolute dry matter was added per time?
+
+It does not adjust for starting size.
+
+## 11. RGR
+
+```{r}
+growth_rgr(w1 = 12, w2 = 28, t1 = 14, t2 = 28)
+```
+
+$$
+RGR = \frac{\ln(28)-\ln(12)}{14}.
+$$
+
+### Interpretation
+
+RGR answers: how rapidly did size increase relative to the size already present?
+
+RGR is not a percent unless explicitly multiplied and expressed that way. The natural unit is reciprocal time when the mass units cancel.
+
+## 12. LAR, SLA and LMR
+
+Suppose at one harvest:
+
+```{r}
+W <- 28
+A <- 0.30
+WL <- 10
+lar <- growth_lar(A, W)
+sla <- growth_sla(A, WL)
+lmr <- growth_lmr(WL, W)
+c(LAR = lar, SLA = sla, LMR = lmr, SLA_times_LMR = sla * lmr)
+```
+
+The decomposition
+
+$$
+LAR = SLA\times LMR
+$$
+
+separates deployment of area per leaf mass from allocation of total mass to leaves.
+
+### Interpretation example
+
+If treatment A has greater LAR than treatment B, ask whether the difference comes primarily from thinner/larger-area leaves per unit leaf mass, from greater biomass allocation to leaves, or both. A single LAR value cannot distinguish these mechanisms.
+
+## 13. NAR
+
+```{r}
+growth_nar(
+  w1 = 12,
+  w2 = 28,
+  a1 = 0.14,
+  a2 = 0.30,
+  t1 = 14,
+  t2 = 28
+)
+```
+
+NAR is an interval dry-mass increase per unit leaf area under the classical approximation. It should not be labelled as leaf photosynthesis.
+
+### Equal leaf-area limit
+
+```{r}
+growth_nar(12, 28, 0.20, 0.20, 14, 28)
+```
+
+The implementation uses the continuous limit rather than producing `NaN`.
+
+# Part V. Let the package construct intervals correctly
+
+## 14. Run the integrated classical analysis
+
+```{r}
+idx <- growth_indices(g)
+idx
+```
+
+Inspect the plot-date means used to construct the intervals:
+
+```{r}
+head(idx$aggregated, 12)
+```
+
+Now inspect interval quantities:
+
+```{r}
+head(idx$intervals, 12)
+```
+
+The key methodological point is not the convenience of calculating many columns. It is the explicit aggregation level.
+
+## 15. Summarize AGR by treatment and interval
+
+```{r}
+agr_mean <- aggregate(AGR ~ nitrogen + t1 + t2, idx$intervals, mean)
+agr_mean
+```
+
+A treatment can have the largest final biomass without having the largest AGR in every interval. Growth is a trajectory, not a single ranking.
+
+## 16. Summarize RGR
+
+```{r}
+rgr_mean <- aggregate(RGR ~ nitrogen + t1 + t2, idx$intervals, mean)
+rgr_mean
+```
+
+Young plants often show high proportional growth and later decline in RGR as non-photosynthetic tissues, self-shading, reproduction and resource limitations become more important. Do not expect AGR and RGR to peak at the same time.
+
+## 17. Summarize NAR
+
+```{r}
+nar_mean <- aggregate(NAR ~ nitrogen + t1 + t2, idx$intervals, mean)
+nar_mean
+```
+
+Interpret NAR alongside canopy structure. A treatment with high LAI can experience greater self-shading, while a treatment with smaller LAI can have high mean efficiency per unit leaf area yet lower total stand production.
+
+# Part VI. Crop-level quantities
+
+## 18. CGR
+
+```{r}
+head(idx$intervals[c("plot_id", "nitrogen", "t1", "t2", "CGR")])
+```
+
+Because the teaching biomass refers to a 0.25 m2 sampled quadrat, CGR is normalized to that ground area.
+
+## 19. LAI
+
+```{r}
+head(idx$intervals[c("plot_id", "nitrogen", "t1", "LAI1", "LAI2")])
+```
+
+The numerator and denominator are both area. If leaf area were instead measured per plant, stand density would be required before deriving a stand LAI.
+
+## 20. LAD
+
+```{r}
+head(idx$intervals[c("plot_id", "nitrogen", "t1", "t2", "LAD")])
+```
+
+Whole-season LAD by plot:
+
+```{r}
+lad_plot <- aggregate(LAD ~ plot_id + nitrogen + block, idx$intervals, sum)
+lad_plot
+```
+
+LAD is the integral of canopy area over time. It is useful for comparing canopy persistence but does not directly incorporate radiation, leaf angle, vertical light distribution or changing photosynthetic capacity.
+
+# Part VII. Biomass partitioning
+
+## 21. Inspect component closure
+
+```{r}
+part <- growth_partition(g)
+head(part)
+summary(part$closure)
+table(part$closure_ok)
+```
+
+In real data, closure may depart from one because some organs were not measured, because component and total samples differ, because of rounding, or because of laboratory losses. The default behavior preserves that information.
+
+## 22. Allocation trajectories
+
+```{r}
+pdat <- cbind(
+  maize[c("plot_id", "block", "nitrogen", "day")],
+  part
+)
+
+aggregate(frac_leaf_mass_g ~ nitrogen + day, pdat, mean)
+aggregate(frac_root_mass_g ~ nitrogen + day, pdat, mean)
+aggregate(frac_reproductive_mass_g ~ nitrogen + day, pdat, mean)
+```
+
+### Interpretation
+
+Allocation fractions are constrained by the whole plant. An increase in one fraction necessarily changes the remaining allocation. Treating every component fraction as an independent response can lead to incoherent interpretation.
+
+# Part VIII. A second case: repeated non-destructive phenotyping
+
+## 23. Load the bean dataset
+
+```{r}
+bean <- growth_example_data("bean_repeated")
+head(bean)
+```
+
+Declare the same plants as repeated units:
+
+```{r}
+bg <- growth_data(
+  bean,
+  time = "day",
+  sampling = "repeated",
+  plant = "plant_id",
+  experimental_unit = "plant_id",
+  block = "block",
+  treatment = "water_regime",
+  leaf_area = "projected_leaf_area_m2",
+  metadata = list(dataset_status = "simulated teaching data")
+)
+
+growth_validate(bg)
+growth_plan(bg)
+```
+
+## 24. Plot plant-level trajectories
+
+```{r fig.width=8, fig.height=5}
+growth_plot(bg, response = "height_cm", group = "water_regime", summary = "both")
+```
+
+`growth_plot()` connects observations belonging to the same plant when the plant role is declared. This reveals within-plant trajectories rather than only treatment means.
+
+### What not to do
+
+Do not treat the 192 rows as 192 independent plants. Repeated observations from the same plant share history and biological state.
+
+Version 0.1.0 stops at descriptive visualization for this case because a correct inferential analysis requires a repeated/mixed trajectory model. That model will be introduced in a later version rather than approximated here by an ordinary ANOVA on all rows.
+
+# Part IX. A third case: partitioning and allometry
+
+## 25. Load soybean data
+
+```{r}
+soy <- growth_example_data("soybean_partition")
+head(soy)
+```
+
+```{r}
+sg <- growth_data(
+  soy,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  treatment = "cultivar",
+  block = "block",
+  total_mass = "total_mass_g",
+  leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g",
+  root_mass = "root_mass_g",
+  stem_mass = "stem_mass_g",
+  reproductive_mass = "reproductive_mass_g"
+)
+```
+
+## 26. Partitioning
+
+```{r}
+sp <- growth_partition(sg)
+head(sp)
+```
+
+Combine contextual variables for summaries:
+
+```{r}
+sp2 <- cbind(soy[c("plot_id", "cultivar", "block", "day")], sp)
+aggregate(frac_leaf_mass_g ~ cultivar + day, sp2, mean)
+```
+
+## 27. Root-stem allometry
+
+```{r}
+allo <- growth_allometry(
+  soy,
+  x = "root_mass_g",
+  y = "stem_mass_g",
+  group = "cultivar",
+  level = 0.95
+)
+allo
+```
+
+The output contains $a$, $k$, the standard error and confidence interval of $k$, $R^2$ on the log scale, and residual SD on the log scale.
+
+### Important limitation
+
+High $R^2$ does not establish a universal scaling law. Both root and stem mass change strongly with age; an apparent relationship can partly represent ontogenetic progression. The observed range and design context belong in the interpretation.
+
+# Part X. Sensitivity, errors, and scientific safeguards
+
+## 28. Positive support for logarithmic quantities
+
+RGR and log-log allometry require positive values. This is a mathematical requirement, not a software preference.
+
+```{r error=TRUE}
+growth_rgr(0, 10, 0, 5)
+```
+
+Do not add an arbitrary constant solely to avoid the error. If a measured quantity can legitimately be zero, reconsider the estimand or use a method designed for that support.
+
+## 29. Negative AGR is allowed
+
+```{r}
+growth_agr(20, 18, 50, 60)
+```
+
+Net biomass loss can occur during senescence, stress, tissue abscission or measurement variation. The foundational function reports the signed rate.
+
+## 30. Periodic defoliation requires a different framework
+
+When known leaf or biomass losses occur between harvests, a smooth classical trajectory can confound production with removal. Anten and Ackerly proposed an iterative framework that explicitly incorporates measured biomass and leaf-area losses [@AntenAckerly2001]. `agriGrowthFlow` will treat that as a distinct later module rather than silently forcing the standard NAR formula onto discontinuous trajectories.
+
+## 31. Smoothing is useful, but not yet hidden inside the indices
+
+Shipley and Hunt showed that cubic spline and LOESS smoothers can recover complex growth trajectories and derivatives, and that bootstrap can stabilize smoothing selection [@ShipleyHunt1996]. Poorter proposed a synthesis of classical and functional approaches [@Poorter1989].
+
+Version 0.1.0 keeps raw interval quantities visible. This gives later smooth and bootstrap modules a transparent reference layer.
+
+# Part XI. Reproducible reporting
+
+## 32. Minimum methods information
+
+A complete methods section for a classical destructive growth analysis should include:
+
+1. experimental design and randomization;
+2. treatment and block definitions;
+3. stable experimental unit;
+4. destructive sampling protocol;
+5. number of sampled plants or quadrats per plot and harvest;
+6. harvest times and whether intervals were irregular;
+7. total biomass definition and dry-matter basis;
+8. leaf-area measurement method;
+9. leaf mass definition;
+10. sampled ground area for stand indices;
+11. formulas or software functions used for AGR, RGR, NAR, LAR, SLA, LMR, CGR, LAI and LAD;
+12. aggregation rule within plot-date;
+13. treatment of missing values;
+14. any excluded observations and the documented reason;
+15. software version and package version.
+
+## 33. Example computational record
+
+```{r}
+sessionInfo()
+```
+
+For a reproducible project, save the package source tarball, validation output, analysis script and exact input dataset together.
+
+# Part XII. What the next versions add
+
+## 34. Version 0.2.0
+
+The next modelling layer will add biologically interpretable parametric curves, multistart fitting, model comparison and derived curve traits such as asymptote, inflection, maximum growth rate and time-to-threshold.
+
+## 35. Version 0.3.0
+
+The longitudinal/flexible layer will add nonlinear or polynomial mixed effects, autocorrelation and heterogeneous variance structures, splines/GAMs, derivatives and functional trajectory analysis.
+
+## 36. Version 0.4.0
+
+The uncertainty layer will add design-preserving bootstrap and Bayesian nonlinear/hierarchical inference with prior predictive and posterior predictive checks.
+
+## 37. Version 0.5.0
+
+The biological-events layer will add multiphasic growth, defoliation/loss events, compensation, density/competition, harvest optimization and integration with phenotyping workflows.
+
+# Part XIII. Final integrated example
+
+The complete version 0.1.0 sequence can be written compactly, but each line represents a scientific decision discussed above.
+
+```{r}
+dat <- growth_example_data("maize_destructive")
+
+g <- growth_data(
+  dat,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  treatment = "nitrogen",
+  block = "block",
+  total_mass = "total_mass_g",
+  leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g",
+  root_mass = "root_mass_g",
+  stem_mass = "stem_mass_g",
+  reproductive_mass = "reproductive_mass_g",
+  ground_area = "ground_area_m2"
+)
+
+des <- growth_design(g, "rcbd")
+validation <- growth_validate(des)
+plan <- growth_plan(des)
+plot <- growth_plot(g, response = "total_mass_g", group = "nitrogen", summary = "both")
+indices <- growth_indices(g)
+partition <- growth_partition(g)
+allometry <- growth_allometry(dat, "root_mass_g", "stem_mass_g", group = "nitrogen")
+
+validation
+plan
+head(indices$intervals)
+head(partition)
+allometry
+```
+
+# 38. Interpretation template
+
+A concise scientific interpretation should separate observation from inference. For example:
+
+> Biomass and canopy area increased across the measured period, with visible treatment differences emerging later in the trajectory. Classical interval calculations were formed within stable block-by-treatment plots after averaging destructive quadrat replicates at each harvest. AGR described absolute dry-matter accumulation, whereas RGR described proportional growth and therefore showed a different temporal pattern. LAR was decomposed into SLA and LMR to distinguish leaf morphology from allocation. Stand-level LAI and LAD were calculated only because leaf area and biomass referred to a known sampled ground area. These descriptive growth indices do not by themselves provide a repeated-measures treatment test; inferential trajectory models require the design-aware modelling layers planned for subsequent versions.
+
+This wording avoids a common error: treating descriptive interval quantities as if they were already a complete inferential model.
+
+# 39. Final principles
+
+The foundational workflow can be summarized in five rules.
+
+**Rule 1. Protect the experimental unit.** A harvested plant is not automatically the repeated unit in a destructive experiment.
+
+**Rule 2. Keep physical units explicit.** Ratios and rates are meaningful only when their bases are compatible.
+
+**Rule 3. Plot raw observations.** Model summaries should not hide the observed trajectory and its variability.
+
+**Rule 4. Distinguish absolute, proportional, canopy and allocation questions.** AGR, RGR, NAR, LAR, SLA, LMR, CGR, LAI, LAD and allometry are not interchangeable summaries.
+
+**Rule 5. Do not use future sophistication to conceal foundational uncertainty.** Bootstrap, Bayesian models and nonlinear curves are valuable only after the data-generating structure has been represented correctly.
+
+# References

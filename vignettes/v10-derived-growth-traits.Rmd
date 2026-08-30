@@ -1,0 +1,347 @@
+---
+title: "Derived Biological Traits from Parametric Growth Curves"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Derived Biological Traits from Parametric Growth Curves}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+# Why derived traits matter
+
+The raw coefficients of different nonlinear equations are not directly comparable. A more useful biological question is often:
+
+- when did maximum growth occur?
+- how large was the maximum absolute rate?
+- when was 50% or 90% of the final level reached?
+- how long did the main growth transition last?
+- what total fitted growth exposure occurred over the measured period?
+
+`growth_traits()` converts model-specific coefficients into a common trait table.
+
+# Example candidate set
+
+```{r}
+d <- growth_example_data("sunflower_sigmoid")
+d <- subset(d, cultivar == unique(d$cultivar)[1])
+cs <- growth_fit(
+  d,
+  c("logistic", "gompertz"),
+  time = "day",
+  response = "biomass_g",
+  n_start = 8,
+  seed = 501
+)
+```
+
+```{r}
+tr <- growth_traits(cs)
+tr
+```
+
+# Standard columns
+
+The common table contains:
+
+- `asymptote`;
+- `inflection_time`;
+- `inflection_response`;
+- `maximum_absolute_rate`;
+- `time_maximum_rate`;
+- `t10`;
+- `t50`;
+- `t90`;
+- `auc_observed_support`;
+- `support_min`;
+- `support_max`.
+
+A missing value is preferable to a fabricated biological quantity when a trait is undefined for a model.
+
+# Inflection time
+
+The inflection point marks a change in curvature. For standard monotone sigmoids it also corresponds to the maximum absolute growth rate.
+
+```{r}
+growth_inflection(cs)
+```
+
+For logistic growth,
+
+\[
+t_{\mathrm{inf}}=\mathrm{mid},\qquad W(t_{\mathrm{inf}})=A/2.
+\]
+
+For Gompertz growth,
+
+\[
+t_{\mathrm{inf}}=\mathrm{mid},\qquad W(t_{\mathrm{inf}})=A/e.
+\]
+
+The equal name `mid` therefore does not imply the same response fraction.
+
+# Richards inflection
+
+Under the package Richards parameterization [@Richards1959], `mid` remains the inflection time, but the response fraction depends on `shape`:
+
+\[
+\frac{W(t_{\mathrm{inf}})}{A}=(1+\nu)^{-1/\nu}.
+\]
+
+This provides a direct biological interpretation of the asymmetry parameter.
+
+# Maximum absolute rate
+
+```{r}
+growth_maxrate(cs)
+```
+
+The units are response units per time unit.
+
+If biomass is g per plant and time is days after emergence, maximum absolute rate has units g plant\(^{-1}\) day\(^{-1}\).
+
+If biomass is g m\(^{-2}\), the corresponding rate is g m\(^{-2}\) day\(^{-1}\).
+
+Always report the response basis.
+
+# t10, t50, and t90
+
+```{r}
+tr[, c("model", "t10", "t50", "t90")]
+```
+
+These are times to reach 10%, 50%, and 90% of a finite upper level.
+
+The transition duration
+
+\[
+D_{10-90}=t_{90}-t_{10}
+\]
+
+can be useful for comparing how quickly cultivars or treatments traverse the principal growth phase.
+
+```{r}
+tr$duration_10_90 <- tr$t90 - tr$t10
+tr[, c("model", "duration_10_90")]
+```
+
+# Custom fractional targets
+
+```{r}
+f <- cs$fits$logistic
+growth_time_to(f, fraction = c(0.10, 0.25, 0.50, 0.75, 0.90))
+```
+
+Fractional targets require a finite upper level.
+
+# Absolute targets
+
+Absolute targets can be more useful when the asymptote is uncertain or when a management threshold has a natural response scale.
+
+```{r}
+growth_time_to(f, target = c(50, 100, 150))
+```
+
+A target beyond the finite upper level returns an unavailable time rather than an impossible finite estimate.
+
+# Zero targets
+
+The mathematical time associated with zero depends on the curve family.
+
+For logistic, Gompertz, Richards, and expolinear trajectories, zero is approached asymptotically toward negative infinity.
+
+For Chapman-Richards, Weibull, and von Bertalanffy forms in the package, zero is assigned at the fitted `origin` and earlier.
+
+For beta growth, zero occurs at the biological elapsed-time origin.
+
+```{r}
+growth_time_to(f, target = 0)
+```
+
+# AUC is limited to observed support
+
+```{r}
+tr[, c("auc_observed_support", "support_min", "support_max")]
+```
+
+The package does not integrate a sigmoid curve to infinity because such a quantity would be dominated by the arbitrary extension of a positive asymptote.
+
+Instead,
+
+\[
+AUC_{obs}=\int_{t_{min}}^{t_{max}} \hat W(t)\,dt.
+\]
+
+This trait summarizes fitted response exposure over the actual measured time window.
+
+Comparisons of AUC are meaningful only when the support interval and response units are comparable.
+
+# Expolinear traits
+
+```{r}
+w <- growth_example_data("wheat_expolinear")
+w <- subset(w, nitrogen == unique(w$nitrogen)[1])
+f_exp <- growth_fit(w, "expolinear", time = "day", response = "biomass_g_m2")
+growth_traits(f_exp)
+```
+
+Expolinear growth has no finite upper biomass asymptote. Consequently:
+
+- `asymptote` is unavailable;
+- t10, t50, and t90 relative to an asymptote are unavailable;
+- maximum absolute rate equals `cm` as an asymptotic rate;
+- `time_maximum_rate` is infinite because the derivative approaches `cm` rather than attaining it at a finite time.
+
+Absolute targets remain available.
+
+```{r}
+growth_time_to(f_exp, target = c(200, 400, 600))
+```
+
+# Beta-growth traits
+
+For the determinate beta function [@YinEtAl2003; @YinEtAl2003Erratum]:
+
+- `wmax` is the final size;
+- `tm` is the time of maximum absolute growth rate;
+- `te` is the finite end of growth.
+
+```{r eval=FALSE}
+f_beta <- growth_multistart(
+  d,
+  "beta_growth",
+  time = "day",
+  response = "biomass_g",
+  n_start = 40,
+  seed = 61
+)
+growth_traits(f_beta)
+```
+
+A fitted `te` is scientifically convincing only when the experiment provides data close enough to the end of growth. A mathematically finite estimate is not equivalent to empirical support.
+
+# Grouped descriptive traits
+
+```{r}
+sun <- growth_example_data("sunflower_sigmoid")
+grp <- growth_fit(
+  sun,
+  "logistic",
+  time = "day",
+  response = "biomass_g",
+  group = "cultivar",
+  n_start = 5,
+  seed = 19
+)
+gtr <- growth_traits(grp)
+gtr
+```
+
+The output is always a data frame and includes `group` for grouped collections.
+
+```{r}
+gtr$duration_10_90 <- gtr$t90 - gtr$t10
+gtr[, c("group", "inflection_time", "maximum_absolute_rate", "duration_10_90")]
+```
+
+These quantities describe separate curves. They do not by themselves constitute a joint statistical test among cultivars.
+
+# Trait extrapolation
+
+A trait can be mathematically defined but weakly supported by data.
+
+Suppose the observed maximum time is 56 days and fitted t90 is 84 days. The t90 estimate is an extrapolation beyond measured support.
+
+Check this explicitly:
+
+```{r}
+tr$inflection_inside_support <- with(tr, inflection_time >= support_min & inflection_time <= support_max)
+tr$t90_inside_support <- with(tr, t90 >= support_min & t90 <= support_max)
+tr[, c("model", "inflection_inside_support", "t90_inside_support")]
+```
+
+An agronomic report should distinguish interpolation from extrapolation.
+
+# Trait uncertainty in 0.2.0
+
+Version 0.2.0 provides point estimates for derived traits. It does not attach bootstrap or Bayesian uncertainty intervals to t90, maximum rate, or AUC.
+
+This is a deliberate boundary of the release.
+
+Nonlinear transformation of uncertain coefficients can produce asymmetric trait uncertainty. A later bootstrap layer should re-estimate the entire model within each resample rather than only transforming coefficient standard errors.
+
+# Comparing biological conclusions across models
+
+```{r}
+growth_compare(cs)
+growth_traits(cs)
+```
+
+A useful sensitivity analysis asks whether the biological conclusion changes when a scientifically plausible alternative curve is used.
+
+Examples:
+
+- Is cultivar ranking by t50 stable?
+- Is maximum absolute rate similar under logistic and Gompertz fits?
+- Does t90 change enough to alter a harvest recommendation?
+- Does AUC ranking depend on model family?
+
+# Reporting derived traits
+
+A trait table should include units and model context.
+
+Recommended columns include:
+
+- model;
+- estimate;
+- response unit;
+- time unit;
+- observed support;
+- whether the trait lies inside support;
+- uncertainty method, once available.
+
+# What not to do
+
+Do not compare t50 from curves fitted to different biological time origins without transformation.
+
+Do not report expolinear t90 relative to a nonexistent finite asymptote.
+
+Do not call an extrapolated t90 an observed maturity date.
+
+Do not interpret model-specific `mid` coefficients as identical biological fractions across all families.
+
+Do not imply bootstrap or Bayesian uncertainty where version 0.2.0 provides only point traits.
+
+# Integrated workflow
+
+```{r}
+d <- growth_example_data("sunflower_sigmoid")
+d <- subset(d, cultivar == unique(d$cultivar)[1])
+
+fit <- growth_fit(
+  d,
+  c("logistic", "gompertz"),
+  time = "day",
+  response = "biomass_g",
+  n_start = 8,
+  seed = 73
+)
+
+growth_compare(fit)
+growth_traits(fit)
+growth_inflection(fit)
+growth_maxrate(fit)
+```
+
+# Next vignette
+
+The complete analysis sequence is developed in `v11-parametric-growth-workflow.Rmd`, which connects experimental design, classical growth analysis, parametric fitting, diagnostics, comparison, prediction, and biological interpretation.

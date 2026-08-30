@@ -1,0 +1,1654 @@
+---
+title: "Foundations to Biological Events and Decisions: Complete agriGrowthFlow Workflow"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Foundations to Biological Events and Decisions: Complete agriGrowthFlow Workflow}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.5)
+```
+
+# Overview
+
+This is the integrated tutorial for agriGrowthFlow 0.5.0. It connects all major layers of the package in the order that a plant-growth analysis should normally be considered: experimental design, data declaration, classical physiology, parametric curves, longitudinal dependence, flexible trajectories, functional analysis, uncertainty, biological events, competition, and decision support.
+
+The package is organized around one principle: statistical sophistication cannot repair a wrongly defined experimental unit.
+
+# 1. Start with the scientific question
+
+Before importing data, write the target question in biological language. Examples include:
+
+- Does water deficit alter final biomass, developmental timing, or maximum growth rate?
+- Does defoliation reduce cumulative growth or only delay it?
+- Are two apparent growth phases supported by sufficient temporal observations?
+- Does neighborhood pressure explain plant-to-plant size variation?
+- When does a crop reach a pre-specified biological threshold?
+- Which observation schedule is likely to capture both rapid growth and curvature?
+
+Each question implies a different estimand. A model is chosen after the estimand and design are clear.
+
+# 2. Declare the sampling structure
+
+Classical plant growth analysis distinguishes repeated non-destructive measurements from destructive harvests. Hunt provides the physiological framework for AGR, RGR, NAR, LAR, SLA, and related quantities [@Hunt1990]. Keuls and Garretsen emphasize that valid growth-curve inference depends on defining the plot or persistent experimental unit correctly [@KeulsGarretsen1982].
+
+```{r}
+library(agriGrowthFlow)
+maize <- growth_example_data("maize_destructive")
+g <- growth_data(
+  maize,
+  time="day",
+  sampling="destructive",
+  experimental_unit="plot_id",
+  treatment="nitrogen",
+  block="block",
+  total_mass="total_mass_g",
+  leaf_area="leaf_area_m2",
+  leaf_mass="leaf_mass_g",
+  ground_area="ground_area_m2"
+)
+growth_validate(g)
+growth_plan(g)
+```
+
+# 3. Inspect before modeling
+
+```{r, eval=FALSE}
+growth_plot(g, response="total_mass_g")
+```
+
+For destructive sampling, do not draw lines that imply the same harvested plant was followed over time. Plot-level summaries or separate time distributions are more appropriate.
+
+# 4. Classical growth analysis
+
+```{r, eval=FALSE}
+idx <- growth_indices(g)
+idx
+```
+
+Classical indices answer interval-based physiological questions. They remain useful even when more sophisticated trajectory models are later fitted.
+
+# 5. Parametric growth models
+
+```{r, eval=FALSE}
+sun <- growth_example_data("sunflower_sigmoid")
+s1 <- subset(sun, cultivar=="C1")
+fits <- growth_fit(s1, c("logistic","gompertz","richards"), time="day", response="biomass_g", n_start=10, seed=10)
+growth_compare(fits)
+growth_traits(fits)
+```
+
+Richards-type growth models provide interpretable sigmoidal structure [@Richards1959]. Model comparison should be combined with diagnostics and biological plausibility rather than based on a single information criterion.
+
+# 6. Flexible and longitudinal layers
+
+Repeated observations from the same plant are dependent. The 0.3.0 layer provides mixed models, residual covariance, smoothing, derivatives, FPCA, and MANOVA growth components.
+
+```{r, eval=FALSE}
+bean <- growth_example_data("bean_repeated")
+if (requireNamespace("nlme", quietly=TRUE)) {
+  m <- growth_mixed(bean, time="day", response="height_cm", unit="plant_id", treatment="water_regime", degree=2, correlation="car1")
+  growth_mixed_diagnose(m)
+}
+
+s <- growth_smooth(bean, time="day", response="projected_leaf_area_m2", group="water_regime", method="smooth_spline")
+growth_derivative(s)
+```
+
+Flexible smoothers are particularly useful when no single biological curve family is defensible. Shipley and Hunt demonstrated the value of regression smoothers for deriving growth rates without forcing a global parametric form [@ShipleyHunt1996].
+
+# 7. Uncertainty is part of the result
+
+The 0.4.0 layer provides bootstrap and Bayesian workflows.
+
+```{r, eval=FALSE}
+f <- growth_fit(s1, "logistic", time="day", response="biomass_g")
+b <- growth_boot(f, R=499, method="case", seed=1)
+growth_boot_ci(b)
+growth_boot_traits(b, traits=c("t50","t90","maximum_absolute_rate"))
+```
+
+When persistent units exist, cluster resampling should be considered so repeated rows are not treated as independently exchangeable.
+
+Bayesian nonlinear models can propagate uncertainty directly to biologically meaningful traits. Prior predictive checks and MCMC diagnostics remain mandatory gates rather than optional decoration.
+
+# 8. Multiphase growth
+
+The 0.5.0 biological-events layer begins where a single sigmoid becomes inadequate.
+
+```{r, eval=FALSE}
+coffee <- growth_example_data("coffee_diphasic")
+mp <- growth_diphasic(coffee, time="day", response="biomass_g", group="treatment", n_start=15, seed=20)
+mp
+```
+
+Mischan et al. show why critical points of a diphasic logistic sum must be computed on the complete function [@MischanEtAl2015]. The package follows that rule for stability points.
+
+```{r, eval=FALSE}
+control_mp <- growth_diphasic(subset(coffee,treatment=="control"), time="day", response="biomass_g", n_start=20, seed=21)
+growth_stability(control_mp)
+```
+
+# 9. Structural changepoints
+
+A smooth inflection and a piecewise-linear breakpoint are not the same object.
+
+```{r, eval=FALSE}
+cp <- growth_changepoint(subset(coffee,treatment=="control"), time="day", response="biomass_g")
+cp
+```
+
+The breakpoint approach is related to segmented-regression thinking [@Muggeo2003], but the package keeps its current one-breakpoint grid-search implementation explicit and limited.
+
+# 10. Known disturbances
+
+```{r}
+defdat <- growth_example_data("bean_defoliation")
+ev <- growth_event(defdat, time="day", response="total_mass_g", event_time=21, unit="plant_id", event_type="defoliation")
+ev
+```
+
+Known intervention times should normally be declared, not re-estimated from the response.
+
+# 11. Iterative defoliation analysis
+
+Anten and Ackerly developed an iterative approach for plants with recurring biomass and leaf-area losses [@AntenAckerly2001]. The method requires measured loss information.
+
+```{r, eval=FALSE}
+def_fit <- growth_defoliation(
+  subset(defdat,treatment=="defoliated"),
+  time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2",
+  total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2",
+  unit="plant_id"
+)
+def_fit$parameters
+```
+
+# 12. Quantify compensation
+
+```{r}
+growth_compensation(defdat, group="treatment", control="control", response="total_mass_g", time="day", unit="plant_id", metric="final")
+growth_compensation(defdat, group="treatment", control="control", response="total_mass_g", time="day", unit="plant_id", metric="auc")
+```
+
+The choice of final value versus AUC should be made from the biological question.
+
+# 13. Density and spatial competition
+
+```{r}
+den <- growth_example_data("maize_density")
+growth_density(den, density="density_plants_m2", plant_mass="plant_mass_g")
+
+trees <- growth_example_data("tree_competition")
+head(growth_neighbor(trees, id="plant_id", x="x_m", y="y_m", size="size_cm", radius=3))
+```
+
+Gates presents a mechanistic spatial competition model based on coupled equations and zones of influence [@Gates1982]. `growth_competition()` is deliberately a simpler generic coupled logistic system.
+
+```{r}
+A <- matrix(c(0,.2,.2,0),2)
+csim <- growth_competition(c(1,1), times=0:8, r=.4, K=20, competition_matrix=A, dt=.05)
+head(csim$trajectory)
+```
+
+# 14. Biological thresholds
+
+```{r}
+f <- growth_fit(subset(growth_example_data("sunflower_sigmoid"),cultivar=="C1"), "logistic", time="day", response="biomass_g")
+growth_threshold(f,.5,type="fraction")
+growth_plateau_time(f,criterion="response",response_fraction=.95)
+```
+
+Thresholds should be defined before looking for the most favorable treatment result.
+
+# 15. Harvest decisions
+
+Growth modeling texts emphasize that different growth functions answer different applied questions [@Panik2014]. A harvest decision additionally needs an objective function.
+
+```{r}
+growth_harvest_opt(f, price=1, cost_per_time=.2, discount_rate=.005)
+```
+
+This is model-conditioned decision support, not an agronomic recommendation independent of price, costs, uncertainty, and product quality.
+
+# 16. Observation planning
+
+```{r}
+growth_schedule(f,n=7,method="rate_curvature")
+growth_schedule(time_range=c(0,80),n=7,method="equal")
+```
+
+The heuristic emphasizes regions with large rate and curvature. It is useful for teaching and pilot planning but should not be described as D-optimal.
+
+# 17. Simulate a candidate design
+
+```{r}
+sim <- growth_design_sim("logistic",c(asym=100,mid=30,scale=8),times=seq(0,60,10),n_unit=12,sigma=3,random_asym_sd=.08,seed=1)
+head(sim)
+```
+
+Change one assumption at a time, then combine plausible unfavorable assumptions. A design should not be judged only under the scenario used to invent it.
+
+# 18. Power for a derived trait
+
+```{r}
+growth_power(effect=5,trait_sd=8,n_unit=20,n_sim=1000,seed=1)
+growth_power(effect=5,trait_sd=8,n_unit=40,n_sim=1000,seed=1)
+```
+
+This is a trait-level approximation. For a definitive design, simulate the actual intended model, covariance, missingness, and fitting workflow.
+
+# 19. Choosing the analysis path
+
+Use classical growth indices when interval physiology is primary. Use parametric curves when interpretable parameters are supported. Use mixed models when repeated-unit inference is central. Use smoothers when shape should be learned flexibly. Use FPCA when the entire trajectory is treated as a functional phenotype. Use multiphase models only when the temporal support and biology justify multiple periods of accumulation. Use the disturbance module when actual loss events exist. Use decision functions only after defining biological and economic rules.
+
+# 20. Reproducible reporting
+
+Every analysis should retain:
+
+- data version or checksum;
+- experimental-unit definition;
+- sampling type;
+- time and response units;
+- preprocessing and aggregation;
+- model family and parameterization;
+- starting-value strategy;
+- convergence information;
+- covariance or resampling unit;
+- uncertainty intervals;
+- extrapolation range;
+- decision thresholds and economic assumptions;
+- software version and optional backend versions.
+
+# 21. What the package intentionally does not automate
+
+It does not infer the experimental unit from row count alone. It does not label mathematical phases as phenological stages. It does not estimate unknown defoliation losses from a smooth trajectory. It does not claim that a generic neighborhood index is causal. It does not call a heuristic schedule statistically optimal. It does not convert a model-conditioned harvest optimum into a universal recommendation.
+
+# 22. Integrated teaching labs
+
+## Integrated lab 1
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 1: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=501)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 1 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 2
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 2: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=502)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 2 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 3
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 3: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=503)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 3 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 4
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 4: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=504)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 4 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 5
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 5: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=505)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 5 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 6
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 6: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=506)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 6 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 7
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 7: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=507)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 7 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 8
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 8: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=508)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 8 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 9
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 9: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=509)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 9 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 10
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 10: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=510)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 10 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 11
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 11: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=511)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 11 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 12
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 12: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=512)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 12 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 13
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 13: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=513)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 13 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 14
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 14: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=514)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 14 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 15
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 15: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=515)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 15 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 16
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 16: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=516)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 16 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 17
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 17: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=517)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 17 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 18
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 18: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=518)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 18 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 19
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 19: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=519)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 19 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 20
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 20: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=520)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 20 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 21
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 21: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=521)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 21 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 22
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 22: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=522)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 22 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 23
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 23: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=523)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 23 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 24
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 24: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=524)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 24 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 25
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 25: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=525)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 25 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 26
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 26: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=526)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 26 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 27
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 27: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=527)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 27 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 28
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 28: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=528)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 28 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 29
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 29: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=529)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 29 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 30
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 30: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=530)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 30 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 31
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 31: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=531)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 31 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 32
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 32: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=532)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 32 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 33
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 33: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=533)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 33 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 34
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 34: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=534)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 34 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 35
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 35: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=535)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 35 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 36
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 36: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=536)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 36 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 37
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 37: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=537)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 37 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 38
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 38: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=538)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 38 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 39
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 39: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=539)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 39 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 40
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 40: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=540)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 40 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 41
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 41: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=541)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 41 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 42
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 42: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=542)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 42 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 43
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 43: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=543)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 43 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 44
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 44: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=544)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 44 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 45
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 45: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=545)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 45 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 46
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 46: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=546)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 46 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 47
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 47: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=547)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 47 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 48
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 48: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=548)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 48 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 49
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 49: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=549)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 49 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 50
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 50: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=550)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 50 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 51
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 51: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=551)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 51 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 52
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 52: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=552)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 52 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 53
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 53: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=553)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 53 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 54
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 54: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=554)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 54 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 55
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 55: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=555)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 55 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 56
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 56: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=556)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 56 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 57
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 57: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=557)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 57 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 58
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 58: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=558)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 58 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 59
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 59: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=559)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 59 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+## Integrated lab 60
+
+Choose one of the frozen simulated datasets and identify its persistent experimental unit, sampling process, primary biological estimand, and the package layer that best matches the question. Run at least one descriptive model and one diagnostic or uncertainty procedure. If the data contain an event or decision rule, state which inputs are observed facts and which are analyst assumptions. End with a two-sentence interpretation that separates numerical evidence from biological inference.
+
+```{r, eval=FALSE}
+# Lab 60: example scaffold
+d <- growth_example_data("coffee_diphasic")
+z <- subset(d, treatment == "control")
+fit_lab <- growth_diphasic(z, time="day", response="biomass_g", n_start=5, seed=560)
+fit_lab$components
+growth_stability(fit_lab, n=1001)
+```
+
+### Lab 60 reporting questions
+
+1. What is the experimental unit?
+2. Which rows are repeated observations versus independent units?
+3. Which parameter or trait is the estimand?
+4. What part of the conclusion depends on model form?
+5. Is any reported time outside the observed support?
+6. What uncertainty source is not represented by the current calculation?
+7. What additional biological measurement would make the interpretation stronger?
+
+# References
+
+The integrated workflow draws on @Hunt1990, @KeulsGarretsen1982, @ShipleyHunt1996, @Richards1959, @MischanEtAl2015, @AntenAckerly2001, @Muggeo2003, @Gates1982, and @Panik2014.

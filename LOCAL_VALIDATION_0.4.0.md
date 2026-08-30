@@ -1,0 +1,433 @@
+# agriGrowthFlow 0.4.0: Static Validation
+
+**Result: 427 PASS, 0 FAIL.**
+
+This static battery validates source-level contracts without executing R or compiling Stan. Runtime testthat, vignette rendering, roxygen2 regeneration, R CMD build, R CMD check --as-cran, and optional Bayesian compilation remain local runtime gates.
+
+- **PASS** DESCRIPTION contains Package: agriGrowthFlow
+- **PASS** DESCRIPTION contains Version: 0.4.0
+- **PASS** DESCRIPTION contains License: MIT + file LICENSE
+- **PASS** DESCRIPTION contains Depends: R (>= 4.2.0)
+- **PASS** DESCRIPTION title length suitable :: 62 characters
+- **PASS** Dependency declared: minpack.lm
+- **PASS** Dependency declared: nlme
+- **PASS** Dependency declared: mgcv
+- **PASS** Dependency declared: scam
+- **PASS** Dependency declared: refund
+- **PASS** Dependency declared: fdapace
+- **PASS** Dependency declared: brms
+- **PASS** Dependency declared: posterior
+- **PASS** Dependency declared: loo
+- **PASS** Dependency declared: cmdstanr
+- **PASS** Dependency declared: knitr
+- **PASS** Dependency declared: rmarkdown
+- **PASS** Dependency declared: testthat
+- **PASS** README identifies version 0.4.0
+- **PASS** NEWS begins with version 0.4.0
+- **PASS** CITATION identifies version 0.4.0
+- **PASS** 0.4.0 artifact present: REFERENCE_AUDIT_0.4.0.md
+- **PASS** 0.4.0 artifact present: IMPLEMENTATION_SPEC_0.4.0.md
+- **PASS** 0.4.0 artifact present: NAMESPACE_RD_SYNC_0.4.0.md
+- **PASS** Public API export count :: 53 exports
+- **PASS** No duplicate exports
+- **PASS** Exported function defined: growth_agr
+- **PASS** Exported function defined: growth_allometry
+- **PASS** Exported function defined: growth_cgr
+- **PASS** Exported function defined: growth_classical
+- **PASS** Exported function defined: growth_data
+- **PASS** Exported function defined: growth_design
+- **PASS** Exported function defined: growth_example_data
+- **PASS** Exported function defined: growth_indices
+- **PASS** Exported function defined: growth_lad
+- **PASS** Exported function defined: growth_lai
+- **PASS** Exported function defined: growth_lar
+- **PASS** Exported function defined: growth_lmr
+- **PASS** Exported function defined: growth_nar
+- **PASS** Exported function defined: growth_partition
+- **PASS** Exported function defined: growth_plan
+- **PASS** Exported function defined: growth_plot
+- **PASS** Exported function defined: growth_rgr
+- **PASS** Exported function defined: growth_sla
+- **PASS** Exported function defined: growth_validate
+- **PASS** Exported function defined: growth_models
+- **PASS** Exported function defined: growth_start
+- **PASS** Exported function defined: growth_fit
+- **PASS** Exported function defined: growth_multistart
+- **PASS** Exported function defined: growth_predict
+- **PASS** Exported function defined: growth_compare
+- **PASS** Exported function defined: growth_diagnose
+- **PASS** Exported function defined: growth_traits
+- **PASS** Exported function defined: growth_inflection
+- **PASS** Exported function defined: growth_maxrate
+- **PASS** Exported function defined: growth_time_to
+- **PASS** Exported function defined: growth_mixed
+- **PASS** Exported function defined: growth_mixed_diagnose
+- **PASS** Exported function defined: growth_smooth
+- **PASS** Exported function defined: growth_smooth_predict
+- **PASS** Exported function defined: growth_derivative
+- **PASS** Exported function defined: growth_acceleration
+- **PASS** Exported function defined: growth_smooth_traits
+- **PASS** Exported function defined: growth_fpca
+- **PASS** Exported function defined: growth_functional
+- **PASS** Exported function defined: growth_curve_coefficients
+- **PASS** Exported function defined: growth_manova
+- **PASS** Exported function defined: growth_boot
+- **PASS** Exported function defined: growth_boot_ci
+- **PASS** Exported function defined: growth_boot_traits
+- **PASS** Exported function defined: growth_selection_stability
+- **PASS** Exported function defined: growth_prior
+- **PASS** Exported function defined: growth_bayes
+- **PASS** Exported function defined: growth_prior_predict
+- **PASS** Exported function defined: growth_pp_check
+- **PASS** Exported function defined: growth_bayes_diagnose
+- **PASS** Exported function defined: growth_posterior_traits
+- **PASS** Exported function defined: growth_loo
+- **PASS** Exported function defined: growth_model_average
+- **PASS** 0.4.0 function exported: growth_boot
+- **PASS** 0.4.0 function exported: growth_boot_ci
+- **PASS** 0.4.0 function exported: growth_boot_traits
+- **PASS** 0.4.0 function exported: growth_selection_stability
+- **PASS** 0.4.0 function exported: growth_prior
+- **PASS** 0.4.0 function exported: growth_bayes
+- **PASS** 0.4.0 function exported: growth_prior_predict
+- **PASS** 0.4.0 function exported: growth_pp_check
+- **PASS** 0.4.0 function exported: growth_bayes_diagnose
+- **PASS** 0.4.0 function exported: growth_posterior_traits
+- **PASS** 0.4.0 function exported: growth_loo
+- **PASS** 0.4.0 function exported: growth_model_average
+- **PASS** S3 registration count :: 29 methods
+- **PASS** S3 method defined: as.data.frame.agri_growth_data
+- **PASS** S3 method defined: coef.agri_growth_fit
+- **PASS** S3 method defined: plot.agri_growth_fit
+- **PASS** S3 method defined: print.agri_growth_allometry
+- **PASS** S3 method defined: print.agri_growth_comparison
+- **PASS** S3 method defined: print.agri_growth_data
+- **PASS** S3 method defined: print.agri_growth_design
+- **PASS** S3 method defined: print.agri_growth_diagnostics
+- **PASS** S3 method defined: print.agri_growth_fit
+- **PASS** S3 method defined: print.agri_growth_fit_collection
+- **PASS** S3 method defined: print.agri_growth_fit_set
+- **PASS** S3 method defined: print.agri_growth_indices
+- **PASS** S3 method defined: print.agri_growth_partition
+- **PASS** S3 method defined: print.agri_growth_plan
+- **PASS** S3 method defined: print.agri_growth_start
+- **PASS** S3 method defined: print.agri_growth_validation
+- **PASS** S3 method defined: print.agri_growth_mixed
+- **PASS** S3 method defined: print.agri_growth_mixed_diagnostics
+- **PASS** S3 method defined: print.agri_growth_smooth
+- **PASS** S3 method defined: print.agri_growth_smooth_collection
+- **PASS** S3 method defined: print.agri_growth_fpca
+- **PASS** S3 method defined: print.agri_growth_manova
+- **PASS** S3 method defined: print.agri_growth_boot
+- **PASS** S3 method defined: print.agri_growth_selection_stability
+- **PASS** S3 method defined: print.agri_growth_prior
+- **PASS** S3 method defined: print.agri_growth_bayes
+- **PASS** S3 method defined: print.agri_growth_bayes_diagnostics
+- **PASS** S3 method defined: print.agri_growth_loo
+- **PASS** S3 method defined: print.agri_growth_model_average
+- **PASS** R delimiter balance: bayesian-growth.R
+- **PASS** R delimiter balance: bootstrap-uncertainty.R
+- **PASS** R delimiter balance: classical-rates.R
+- **PASS** R delimiter balance: classical-workflow.R
+- **PASS** R delimiter balance: flexible-prep.R
+- **PASS** R delimiter balance: functional-growth.R
+- **PASS** R delimiter balance: growth-data.R
+- **PASS** R delimiter balance: growth-design.R
+- **PASS** R delimiter balance: growth-manova.R
+- **PASS** R delimiter balance: longitudinal-mixed.R
+- **PASS** R delimiter balance: model-registry.R
+- **PASS** R delimiter balance: parametric-diagnostics.R
+- **PASS** R delimiter balance: parametric-fit.R
+- **PASS** R delimiter balance: parametric-predict-compare.R
+- **PASS** R delimiter balance: parametric-prep-start.R
+- **PASS** R delimiter balance: parametric-traits.R
+- **PASS** R delimiter balance: partition-allometry.R
+- **PASS** R delimiter balance: plot.R
+- **PASS** R delimiter balance: smooth-growth.R
+- **PASS** R delimiter balance: utils.R
+- **PASS** Manual alias present: growth_agr
+- **PASS** Manual alias unique: growth_agr :: classical_growth_rates.Rd
+- **PASS** Manual alias present: growth_allometry
+- **PASS** Manual alias unique: growth_allometry :: growth_allometry.Rd
+- **PASS** Manual alias present: growth_cgr
+- **PASS** Manual alias unique: growth_cgr :: classical_growth_rates.Rd
+- **PASS** Manual alias present: growth_classical
+- **PASS** Manual alias unique: growth_classical :: growth_classical.Rd
+- **PASS** Manual alias present: growth_data
+- **PASS** Manual alias unique: growth_data :: growth_data.Rd
+- **PASS** Manual alias present: growth_design
+- **PASS** Manual alias unique: growth_design :: growth_design.Rd
+- **PASS** Manual alias present: growth_example_data
+- **PASS** Manual alias unique: growth_example_data :: growth_data.Rd
+- **PASS** Manual alias present: growth_indices
+- **PASS** Manual alias unique: growth_indices :: growth_classical.Rd
+- **PASS** Manual alias present: growth_lad
+- **PASS** Manual alias unique: growth_lad :: growth_lad.Rd
+- **PASS** Manual alias present: growth_lai
+- **PASS** Manual alias unique: growth_lai :: classical_growth_rates.Rd
+- **PASS** Manual alias present: growth_lar
+- **PASS** Manual alias unique: growth_lar :: classical_growth_rates.Rd
+- **PASS** Manual alias present: growth_lmr
+- **PASS** Manual alias unique: growth_lmr :: classical_growth_rates.Rd
+- **PASS** Manual alias present: growth_nar
+- **PASS** Manual alias unique: growth_nar :: classical_growth_rates.Rd
+- **PASS** Manual alias present: growth_partition
+- **PASS** Manual alias unique: growth_partition :: growth_partition.Rd
+- **PASS** Manual alias present: growth_plan
+- **PASS** Manual alias unique: growth_plan :: growth_design.Rd
+- **PASS** Manual alias present: growth_plot
+- **PASS** Manual alias unique: growth_plot :: growth_plot.Rd
+- **PASS** Manual alias present: growth_rgr
+- **PASS** Manual alias unique: growth_rgr :: classical_growth_rates.Rd
+- **PASS** Manual alias present: growth_sla
+- **PASS** Manual alias unique: growth_sla :: classical_growth_rates.Rd
+- **PASS** Manual alias present: growth_validate
+- **PASS** Manual alias unique: growth_validate :: growth_design.Rd
+- **PASS** Manual alias present: growth_models
+- **PASS** Manual alias unique: growth_models :: growth_models.Rd
+- **PASS** Manual alias present: growth_start
+- **PASS** Manual alias unique: growth_start :: growth_models.Rd
+- **PASS** Manual alias present: growth_fit
+- **PASS** Manual alias unique: growth_fit :: growth_fit.Rd
+- **PASS** Manual alias present: growth_multistart
+- **PASS** Manual alias unique: growth_multistart :: growth_fit.Rd
+- **PASS** Manual alias present: growth_predict
+- **PASS** Manual alias unique: growth_predict :: growth_predict.Rd
+- **PASS** Manual alias present: growth_compare
+- **PASS** Manual alias unique: growth_compare :: growth_predict.Rd
+- **PASS** Manual alias present: growth_diagnose
+- **PASS** Manual alias unique: growth_diagnose :: growth_predict.Rd
+- **PASS** Manual alias present: growth_traits
+- **PASS** Manual alias unique: growth_traits :: growth_traits.Rd
+- **PASS** Manual alias present: growth_inflection
+- **PASS** Manual alias unique: growth_inflection :: growth_traits.Rd
+- **PASS** Manual alias present: growth_maxrate
+- **PASS** Manual alias unique: growth_maxrate :: growth_traits.Rd
+- **PASS** Manual alias present: growth_time_to
+- **PASS** Manual alias unique: growth_time_to :: growth_traits.Rd
+- **PASS** Manual alias present: growth_mixed
+- **PASS** Manual alias unique: growth_mixed :: longitudinal_growth.Rd
+- **PASS** Manual alias present: growth_mixed_diagnose
+- **PASS** Manual alias unique: growth_mixed_diagnose :: longitudinal_growth.Rd
+- **PASS** Manual alias present: growth_smooth
+- **PASS** Manual alias unique: growth_smooth :: flexible_growth.Rd
+- **PASS** Manual alias present: growth_smooth_predict
+- **PASS** Manual alias unique: growth_smooth_predict :: flexible_growth.Rd
+- **PASS** Manual alias present: growth_derivative
+- **PASS** Manual alias unique: growth_derivative :: flexible_growth.Rd
+- **PASS** Manual alias present: growth_acceleration
+- **PASS** Manual alias unique: growth_acceleration :: flexible_growth.Rd
+- **PASS** Manual alias present: growth_smooth_traits
+- **PASS** Manual alias unique: growth_smooth_traits :: flexible_growth.Rd
+- **PASS** Manual alias present: growth_fpca
+- **PASS** Manual alias unique: growth_fpca :: functional_growth.Rd
+- **PASS** Manual alias present: growth_functional
+- **PASS** Manual alias unique: growth_functional :: functional_growth.Rd
+- **PASS** Manual alias present: growth_curve_coefficients
+- **PASS** Manual alias unique: growth_curve_coefficients :: growth_manova.Rd
+- **PASS** Manual alias present: growth_manova
+- **PASS** Manual alias unique: growth_manova :: growth_manova.Rd
+- **PASS** Manual alias present: growth_boot
+- **PASS** Manual alias unique: growth_boot :: bootstrap_uncertainty.Rd
+- **PASS** Manual alias present: growth_boot_ci
+- **PASS** Manual alias unique: growth_boot_ci :: bootstrap_uncertainty.Rd
+- **PASS** Manual alias present: growth_boot_traits
+- **PASS** Manual alias unique: growth_boot_traits :: bootstrap_uncertainty.Rd
+- **PASS** Manual alias present: growth_selection_stability
+- **PASS** Manual alias unique: growth_selection_stability :: bootstrap_uncertainty.Rd
+- **PASS** Manual alias present: growth_prior
+- **PASS** Manual alias unique: growth_prior :: bayesian_growth.Rd
+- **PASS** Manual alias present: growth_bayes
+- **PASS** Manual alias unique: growth_bayes :: bayesian_growth.Rd
+- **PASS** Manual alias present: growth_prior_predict
+- **PASS** Manual alias unique: growth_prior_predict :: bayesian_growth.Rd
+- **PASS** Manual alias present: growth_pp_check
+- **PASS** Manual alias unique: growth_pp_check :: bayesian_growth.Rd
+- **PASS** Manual alias present: growth_bayes_diagnose
+- **PASS** Manual alias unique: growth_bayes_diagnose :: bayesian_growth.Rd
+- **PASS** Manual alias present: growth_posterior_traits
+- **PASS** Manual alias unique: growth_posterior_traits :: bayesian_growth.Rd
+- **PASS** Manual alias present: growth_loo
+- **PASS** Manual alias unique: growth_loo :: bayesian_model_evaluation.Rd
+- **PASS** Manual alias present: growth_model_average
+- **PASS** Manual alias unique: growth_model_average :: bayesian_model_evaluation.Rd
+- **PASS** 0.4.0 manual mapping: growth_boot :: bootstrap_uncertainty.Rd
+- **PASS** 0.4.0 manual mapping: growth_boot_ci :: bootstrap_uncertainty.Rd
+- **PASS** 0.4.0 manual mapping: growth_boot_traits :: bootstrap_uncertainty.Rd
+- **PASS** 0.4.0 manual mapping: growth_selection_stability :: bootstrap_uncertainty.Rd
+- **PASS** 0.4.0 manual mapping: growth_prior :: bayesian_growth.Rd
+- **PASS** 0.4.0 manual mapping: growth_bayes :: bayesian_growth.Rd
+- **PASS** 0.4.0 manual mapping: growth_prior_predict :: bayesian_growth.Rd
+- **PASS** 0.4.0 manual mapping: growth_pp_check :: bayesian_growth.Rd
+- **PASS** 0.4.0 manual mapping: growth_bayes_diagnose :: bayesian_growth.Rd
+- **PASS** 0.4.0 manual mapping: growth_posterior_traits :: bayesian_growth.Rd
+- **PASS** 0.4.0 manual mapping: growth_loo :: bayesian_model_evaluation.Rd
+- **PASS** 0.4.0 manual mapping: growth_model_average :: bayesian_model_evaluation.Rd
+- **PASS** Twenty-three vignettes present through 0.4.0 :: 23 found
+- **PASS** Vignette instructional depth: v00-overview.Rmd :: 275 lines; threshold 100
+- **PASS** Vignette instructional depth: v01-data-design-validation.Rmd :: 163 lines; threshold 100
+- **PASS** Vignette instructional depth: v02-classical-growth-analysis.Rmd :: 134 lines; threshold 100
+- **PASS** Vignette instructional depth: v03-leaf-traits-and-canopy.Rmd :: 132 lines; threshold 100
+- **PASS** Vignette instructional depth: v04-crop-growth-integrals.Rmd :: 110 lines; threshold 100
+- **PASS** Vignette instructional depth: v05-partitioning-allometry.Rmd :: 130 lines; threshold 100
+- **PASS** Vignette instructional depth: v06-foundations-to-advanced-tutorial.Rmd :: 615 lines; threshold 500
+- **PASS** Vignette instructional depth: v07-parametric-model-library.Rmd :: 327 lines; threshold 100
+- **PASS** Vignette instructional depth: v08-starting-values-and-multistart.Rmd :: 353 lines; threshold 100
+- **PASS** Vignette instructional depth: v09-model-comparison-diagnostics.Rmd :: 343 lines; threshold 100
+- **PASS** Vignette instructional depth: v10-derived-growth-traits.Rmd :: 347 lines; threshold 100
+- **PASS** Vignette instructional depth: v11-parametric-growth-workflow.Rmd :: 1200 lines; threshold 1000
+- **PASS** Vignette instructional depth: v12-longitudinal-mixed-effects.Rmd :: 588 lines; threshold 500
+- **PASS** Vignette instructional depth: v13-flexible-smoothing-derivatives.Rmd :: 496 lines; threshold 450
+- **PASS** Vignette instructional depth: v14-shape-constrained-growth.Rmd :: 311 lines; threshold 300
+- **PASS** Vignette instructional depth: v15-functional-growth-fpca.Rmd :: 423 lines; threshold 400
+- **PASS** Vignette instructional depth: v16-multivariate-growth-manova.Rmd :: 385 lines; threshold 350
+- **PASS** Vignette instructional depth: v17-longitudinal-flexible-workflow.Rmd :: 1094 lines; threshold 1000
+- **PASS** Vignette instructional depth: v18-design-aware-bootstrap.Rmd :: 474 lines; threshold 450
+- **PASS** 0.4.0 vignette uses shared bibliography: v18-design-aware-bootstrap.Rmd
+- **PASS** Vignette instructional depth: v19-bootstrap-traits-selection.Rmd :: 439 lines; threshold 400
+- **PASS** 0.4.0 vignette uses shared bibliography: v19-bootstrap-traits-selection.Rmd
+- **PASS** Vignette instructional depth: v20-bayesian-nonlinear-growth.Rmd :: 508 lines; threshold 480
+- **PASS** 0.4.0 vignette uses shared bibliography: v20-bayesian-nonlinear-growth.Rmd
+- **PASS** Vignette instructional depth: v21-bayesian-diagnostics-loo-averaging.Rmd :: 376 lines; threshold 350
+- **PASS** 0.4.0 vignette uses shared bibliography: v21-bayesian-diagnostics-loo-averaging.Rmd
+- **PASS** Vignette instructional depth: v22-uncertainty-workflow.Rmd :: 1073 lines; threshold 1000
+- **PASS** 0.4.0 vignette uses shared bibliography: v22-uncertainty-workflow.Rmd
+- **PASS** Citation key resolved: AntenAckerly2001
+- **PASS** Citation key resolved: ArchontoulisMiguez2015
+- **PASS** Citation key resolved: Buerkner2017
+- **PASS** Citation key resolved: DavisonHinkley1997
+- **PASS** Citation key resolved: GoudriaanMonteith1990
+- **PASS** Citation key resolved: Hunt1990
+- **PASS** Citation key resolved: KeulsGarretsen1982
+- **PASS** Citation key resolved: Mammen1992
+- **PASS** Citation key resolved: Mirman2014
+- **PASS** Citation key resolved: MischanEtAl2015
+- **PASS** Citation key resolved: PinheiroBates2000
+- **PASS** Citation key resolved: Poorter1989
+- **PASS** Citation key resolved: PyaWood2015
+- **PASS** Citation key resolved: RamsaySilverman2005
+- **PASS** Citation key resolved: Richards1959
+- **PASS** Citation key resolved: ShipleyHunt1996
+- **PASS** Citation key resolved: VehtariEtAl2021
+- **PASS** Citation key resolved: VehtariGelmanGabry2017
+- **PASS** Citation key resolved: WangChiouMuller2016
+- **PASS** Citation key resolved: YaoEtAl2018
+- **PASS** Citation key resolved: YinEtAl2003
+- **PASS** Citation key resolved: YinEtAl2003Erratum
+- **PASS** No unused bibliography keys
+- **PASS** Twenty-two references in double-verification table :: 22 rows
+- **PASS** All reference records marked MATCH
+- **PASS** Each reference names two distinct verification sources
+- **PASS** All 0.4.0 references audited
+- **PASS** 0.4.0 audited reference in bibliography: Buerkner2017
+- **PASS** 0.4.0 audited reference in bibliography: DavisonHinkley1997
+- **PASS** 0.4.0 audited reference in bibliography: Mammen1992
+- **PASS** 0.4.0 audited reference in bibliography: VehtariEtAl2021
+- **PASS** 0.4.0 audited reference in bibliography: VehtariGelmanGabry2017
+- **PASS** 0.4.0 audited reference in bibliography: YaoEtAl2018
+- **PASS** Reference audit documents: Davison & Hinkley
+- **PASS** Reference audit documents: Mammen
+- **PASS** Reference audit documents: Bürkner
+- **PASS** Reference audit documents: Vehtari, Gelman & Gabry
+- **PASS** Reference audit documents: Vehtari et al.
+- **PASS** Reference audit documents: Yao et al.
+- **PASS** Reference audit documents: 22 rows
+- **PASS** Optional Bayesian dependency guarded: brms
+- **PASS** Optional Bayesian dependency guarded: posterior
+- **PASS** Optional Bayesian dependency guarded: loo
+- **PASS** No automatic dependency installation
+- **PASS** Cluster bootstrap unit guard
+- **PASS** Bootstrap low-success warning implemented
+- **PASS** Cluster wild bootstrap implemented
+- **PASS** Wild bootstrap multiplier control implemented
+- **PASS** Positive Bayesian asymptote transformation documented
+- **PASS** Positive Bayesian scale transformation documented
+- **PASS** Positive Richards shape transformation documented
+- **PASS** Prior predictive wrapper implemented
+- **PASS** Posterior diagnostics use posterior package
+- **PASS** Divergence diagnostic implemented
+- **PASS** Pareto-k extraction implemented
+- **PASS** LOO model weights implemented
+- **PASS** Bayesian observation identity safeguard documented
+- **PASS** Logistic posterior timing transform implemented
+- **PASS** Gompertz posterior timing transform implemented
+- **PASS** Logistic maximum-rate transform implemented
+- **PASS** Gompertz maximum-rate transform implemented
+- **PASS** Posterior observed-support AUC implemented
+- **PASS** Expected complete test-source set present :: test-bayesian-growth.R, test-bootstrap-uncertainty.R, test-classical-rates.R, test-classical-workflow.R, test-data-design.R, test-foundation-regressions-020.R, test-functional-growth.R, test-growth-manova.R, test-longitudinal-mixed.R, test-parametric-models.R, test-parametric-traits.R, test-partition-allometry.R, test-smooth-growth.R
+- **PASS** 0.4.0 API represented in test source: growth_boot :: 4 calls
+- **PASS** 0.4.0 API represented in test source: growth_boot_ci :: 1 calls
+- **PASS** 0.4.0 API represented in test source: growth_boot_traits :: 1 calls
+- **PASS** 0.4.0 API represented in test source: growth_selection_stability :: 1 calls
+- **PASS** 0.4.0 API represented in test source: growth_prior :: 3 calls
+- **PASS** 0.4.0 API represented in test source: growth_bayes :: 1 calls
+- **PASS** 0.4.0 API represented in test source: growth_prior_predict :: 0 calls
+- **PASS** 0.4.0 API represented in test source: growth_pp_check :: 0 calls
+- **PASS** 0.4.0 API represented in test source: growth_bayes_diagnose :: 1 calls
+- **PASS** 0.4.0 API represented in test source: growth_posterior_traits :: 1 calls
+- **PASS** 0.4.0 API represented in test source: growth_loo :: 0 calls
+- **PASS** 0.4.0 API represented in test source: growth_model_average :: 0 calls
+- **PASS** Consolidated 0.4.0 API examples present
+- **PASS** API examples include at least three calls: growth_agr :: 3 calls
+- **PASS** API examples include at least three calls: growth_allometry :: 3 calls
+- **PASS** API examples include at least three calls: growth_cgr :: 3 calls
+- **PASS** API examples include at least three calls: growth_classical :: 3 calls
+- **PASS** API examples include at least three calls: growth_data :: 5 calls
+- **PASS** API examples include at least three calls: growth_design :: 5 calls
+- **PASS** API examples include at least three calls: growth_example_data :: 11 calls
+- **PASS** API examples include at least three calls: growth_indices :: 3 calls
+- **PASS** API examples include at least three calls: growth_lad :: 3 calls
+- **PASS** API examples include at least three calls: growth_lai :: 3 calls
+- **PASS** API examples include at least three calls: growth_lar :: 3 calls
+- **PASS** API examples include at least three calls: growth_lmr :: 3 calls
+- **PASS** API examples include at least three calls: growth_nar :: 3 calls
+- **PASS** API examples include at least three calls: growth_partition :: 3 calls
+- **PASS** API examples include at least three calls: growth_plan :: 3 calls
+- **PASS** API examples include at least three calls: growth_plot :: 3 calls
+- **PASS** API examples include at least three calls: growth_rgr :: 3 calls
+- **PASS** API examples include at least three calls: growth_sla :: 3 calls
+- **PASS** API examples include at least three calls: growth_validate :: 3 calls
+- **PASS** API examples include at least three calls: growth_models :: 4 calls
+- **PASS** API examples include at least three calls: growth_start :: 3 calls
+- **PASS** API examples include at least three calls: growth_fit :: 4 calls
+- **PASS** API examples include at least three calls: growth_multistart :: 3 calls
+- **PASS** API examples include at least three calls: growth_predict :: 3 calls
+- **PASS** API examples include at least three calls: growth_compare :: 3 calls
+- **PASS** API examples include at least three calls: growth_diagnose :: 3 calls
+- **PASS** API examples include at least three calls: growth_traits :: 3 calls
+- **PASS** API examples include at least three calls: growth_inflection :: 3 calls
+- **PASS** API examples include at least three calls: growth_maxrate :: 3 calls
+- **PASS** API examples include at least three calls: growth_time_to :: 3 calls
+- **PASS** API examples include at least three calls: growth_mixed :: 3 calls
+- **PASS** API examples include at least three calls: growth_mixed_diagnose :: 3 calls
+- **PASS** API examples include at least three calls: growth_smooth :: 3 calls
+- **PASS** API examples include at least three calls: growth_smooth_predict :: 3 calls
+- **PASS** API examples include at least three calls: growth_derivative :: 3 calls
+- **PASS** API examples include at least three calls: growth_acceleration :: 3 calls
+- **PASS** API examples include at least three calls: growth_smooth_traits :: 3 calls
+- **PASS** API examples include at least three calls: growth_fpca :: 3 calls
+- **PASS** API examples include at least three calls: growth_functional :: 3 calls
+- **PASS** API examples include at least three calls: growth_curve_coefficients :: 3 calls
+- **PASS** API examples include at least three calls: growth_manova :: 3 calls
+- **PASS** API examples include at least three calls: growth_boot :: 3 calls
+- **PASS** API examples include at least three calls: growth_boot_ci :: 3 calls
+- **PASS** API examples include at least three calls: growth_boot_traits :: 3 calls
+- **PASS** API examples include at least three calls: growth_selection_stability :: 3 calls
+- **PASS** API examples include at least three calls: growth_prior :: 3 calls
+- **PASS** API examples include at least three calls: growth_bayes :: 3 calls
+- **PASS** API examples include at least three calls: growth_prior_predict :: 3 calls
+- **PASS** API examples include at least three calls: growth_pp_check :: 3 calls
+- **PASS** API examples include at least three calls: growth_bayes_diagnose :: 3 calls
+- **PASS** API examples include at least three calls: growth_posterior_traits :: 3 calls
+- **PASS** API examples include at least three calls: growth_loo :: 3 calls
+- **PASS** API examples include at least three calls: growth_model_average :: 3 calls
+- **PASS** No em dash in distributed prose/source
+- **PASS** No TODO/FIXME markers
+- **PASS** No ChatGPT citation/UI artifacts in package tree
+- **PASS** No Python cache directories
+- **PASS** 0.4.0 implementation specification covers: 53 exported functions
+- **PASS** 0.4.0 implementation specification covers: Bootstrap layer
+- **PASS** 0.4.0 implementation specification covers: Bayesian nonlinear layer
+- **PASS** 0.4.0 implementation specification covers: PSIS-LOO
+- **PASS** 0.4.0 implementation specification covers: model averaging
+- **PASS** 0.4.0 implementation specification covers: 23

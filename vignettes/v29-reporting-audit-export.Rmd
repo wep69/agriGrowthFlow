@@ -1,0 +1,700 @@
+---
+title: "agriGrowthFlow 1.0.0: Reporting, Audit, and Reproducible Export"
+author: "agriGrowthFlow team"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 1.0.0: Reporting, Audit, and Reproducible Export}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+link-citations: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.5)
+library(agriGrowthFlow)
+```
+
+# Purpose
+
+A statistically correct model is not enough if the analysis cannot be reconstructed.
+
+Version 1.0.0 therefore treats reporting and export as part of the analysis workflow.
+
+This vignette explains:
+
+* `growth_workflow_audit()`;
+* `growth_table()`;
+* `growth_report()`;
+* `growth_export()`;
+* the difference between a complete archive and a review table;
+* how to package model output for collaborators and reviewers;
+* what should and should not be written automatically.
+
+# 1. Why reporting belongs inside the workflow
+
+Plant growth analysis can combine destructive sampling, repeated measurements, nonlinear curves, smoothing, bootstrap, and Bayesian models.
+
+Each layer introduces decisions.
+
+A final table without those decisions is incomplete.
+
+A reproducible analysis record should preserve both numerical results and the contract that generated them.
+
+This is particularly important when the experimental unit is not the individual harvested plant [@KeulsGarretsen1982].
+
+# 2. Create a planning workflow
+
+```{r plan}
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(cultivar)[1])
+
+w_plan <- growth_workflow(
+  d1,
+  time = "day",
+  response = "biomass_g",
+  objective = "trajectory",
+  execute = FALSE,
+  seed = 2001
+)
+```
+
+A planning workflow already contains useful information.
+
+```{r plan-names}
+names(w_plan)
+```
+
+It records the objective, roles, method guide, selected strategy, decision ledger, seed, and execution status.
+
+# 3. Audit the planning workflow
+
+```{r audit-plan}
+audit_plan <- growth_workflow_audit(w_plan)
+audit_plan
+```
+
+The audit uses three statuses.
+
+## PASS
+
+The expected release-level gate is present.
+
+## INFO
+
+The item is optional, intentionally absent, or not applicable.
+
+## FAIL
+
+A structural problem blocks interpretation of the workflow as a complete analysis record.
+
+A planning-only workflow should contain INFO records for fitting-related gates.
+
+That is expected behavior.
+
+# 4. Execute a parametric workflow
+
+```{r run-workflow}
+w <- growth_workflow(
+  d1,
+  time = "day",
+  response = "biomass_g",
+  strategy = "parametric",
+  models = c("logistic", "gompertz"),
+  n_start = 5,
+  seed = 2002
+)
+w
+```
+
+Now audit it again.
+
+```{r audit-run}
+audit_run <- growth_workflow_audit(w)
+audit_run
+```
+
+The audit does not say whether the model is biologically correct.
+
+It says whether key workflow components are available for review.
+
+# 5. A release audit is not a model diagnostic
+
+The distinction is important.
+
+A workflow audit asks:
+
+* was a core model stored?;
+* were diagnostics stored?;
+* was a candidate comparison stored?;
+* was uncertainty attached?;
+* was a seed recorded?;
+
+A model diagnostic asks different questions:
+
+* did optimization converge?;
+* are parameters near hard bounds?;
+* is residual dependence visible?;
+* is the covariance matrix ill-conditioned?;
+* are Bayesian chains mixing adequately?;
+
+Do not substitute one for the other.
+
+# 6. Standardized tables
+
+`growth_table()` provides compact views of common objects.
+
+The default workflow view is the audit.
+
+```{r table-auto}
+growth_table(w)
+```
+
+Request traits explicitly.
+
+```{r table-traits}
+traits <- growth_table(w, component = "traits")
+traits
+```
+
+Request candidate comparison.
+
+```{r table-comparison}
+comparison <- growth_table(w, component = "comparison")
+comparison
+```
+
+Request the method guide.
+
+```{r table-guide}
+head(growth_table(w, component = "guide"))
+```
+
+# 7. Direct fit objects can also be tabulated
+
+```{r direct-fit}
+f <- growth_fit(
+  d1,
+  "logistic",
+  time = "day",
+  response = "biomass_g",
+  n_start = 3,
+  seed = 2003
+)
+```
+
+```{r direct-coefficients}
+growth_table(f, component = "coefficients")
+```
+
+The coefficient table is intentionally simple.
+
+Use the original fit object for full covariance matrices, optimization records, and specialized methods.
+
+# 8. Classical interval tables
+
+The same interface works with classical growth analysis.
+
+```{r classical-setup}
+maize <- growth_example_data("maize_destructive")
+gm <- growth_data(
+  maize,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  treatment = "nitrogen",
+  block = "block",
+  total_mass = "total_mass_g",
+  leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g",
+  ground_area = "ground_area_m2"
+)
+ci <- growth_classical(gm)
+```
+
+```{r classical-table}
+head(growth_table(ci, component = "intervals"))
+```
+
+These intervals preserve the persistent plot before rates are calculated.
+
+Classical indices such as RGR, NAR, LAR, and SLA should retain their biological units and interpretation [@Hunt1990].
+
+# 9. Diagnostics can be standardized when they are not nested
+
+```{r direct-diagnostics}
+diag_f <- growth_diagnose(f)
+growth_table(diag_f, component = "diagnostics")
+```
+
+Nested diagnostics are not silently flattened.
+
+If a workflow contains several candidate models, extract one diagnostic object explicitly.
+
+```{r nested-diagnostics}
+growth_table(w$diagnostics$logistic, component = "diagnostics")
+```
+
+This design avoids presenting model-specific diagnostics as if they belonged to one pooled model.
+
+# 10. Markdown reporting
+
+Generate report text in memory.
+
+```{r report-memory}
+report_text <- growth_report(w, title = "Sunflower growth analysis")
+cat(paste(head(report_text, 20), collapse = "\n"))
+```
+
+The report contains:
+
+* the release version;
+* the objective;
+* the selected strategy;
+* execution status;
+* uncertainty status;
+* seed;
+* workflow audit;
+* candidate comparison when available;
+* biological traits when available;
+* workflow notes;
+* interpretation safeguards.
+
+# 11. What the report deliberately does not write
+
+`growth_report()` does not automatically state that:
+
+* one treatment is superior;
+* one model is biologically true;
+* a causal effect has been established;
+* a harvest date should be adopted commercially;
+* residual normality has been proven;
+* a Bayesian model converged merely because it completed sampling.
+
+These statements require scientific interpretation.
+
+Automatic prose should not create claims that were not supported by the analysis.
+
+# 12. Write the Markdown report to disk
+
+```{r report-file}
+report_file <- tempfile(fileext = ".md")
+growth_report(w, file = report_file, title = "Sunflower growth analysis")
+file.exists(report_file)
+```
+
+The Markdown file is intentionally portable.
+
+It can be inspected without R.
+
+It can be version controlled.
+
+It can be converted later using Quarto or R Markdown if desired.
+
+# 13. RDS is the complete archive
+
+```{r rds-export}
+rds_file <- tempfile(fileext = ".rds")
+growth_export(w, rds_file, format = "rds")
+file.exists(rds_file)
+```
+
+RDS preserves the complete nested object.
+
+That includes fitted models, diagnostics, candidate comparisons, traits, workflow metadata, and uncertainty objects when attached.
+
+For a complete R analysis archive, this is the preferred release format.
+
+# 14. CSV is a review format
+
+```{r csv-export}
+csv_file <- tempfile(fileext = ".csv")
+growth_export(audit_run, csv_file, format = "csv")
+file.exists(csv_file)
+```
+
+CSV is useful for:
+
+* collaborators who do not use R;
+* spreadsheet review;
+* supplementary tables;
+* lightweight inspection;
+* version-control diffs.
+
+CSV cannot preserve a fitted nonlinear model.
+
+It cannot preserve random-effects structures.
+
+It cannot preserve bootstrap fit objects.
+
+It cannot preserve Stan posterior draws and diagnostics as one nested analysis object.
+
+# 15. Bundle export
+
+The bundle combines the complete archive with human-readable review files.
+
+```{r bundle-export}
+bundle_dir <- tempfile(pattern = "agf_bundle_")
+growth_export(w, bundle_dir, format = "bundle")
+list.files(bundle_dir)
+```
+
+A workflow bundle contains at least:
+
+* `object.rds`;
+* `workflow_audit.csv`;
+* `method_guide.csv`;
+* `report.md`.
+
+When available, it also contains:
+
+* `traits.csv`;
+* `candidate_comparison.csv`.
+
+# 16. Why the bundle uses both RDS and flat files
+
+There are two different reproducibility needs.
+
+## Computational reproducibility
+
+The complete object is required.
+
+RDS serves this role.
+
+## Review reproducibility
+
+Humans often need to inspect a small number of important outputs quickly.
+
+CSV and Markdown serve this role.
+
+The bundle keeps both layers together.
+
+# 17. Exporting uncertainty workflows
+
+For bootstrap or Bayesian workflows, the complete object becomes even more important.
+
+Bootstrap inference depends on the original fit, resampling method, successful replicate count, and empirical distribution of traits [@DavisonHinkley1997].
+
+Bayesian inference depends on priors, posterior draws, chain diagnostics, predictive checks, and often PSIS-LOO diagnostics [@Buerkner2017; @VehtariGelmanGabry2017; @VehtariEtAl2021].
+
+Do not reduce that information to one CSV file and discard the fitted object.
+
+# 18. Reproducibility metadata
+
+At minimum, archive:
+
+* package version;
+* R version;
+* operating system;
+* dependency versions;
+* random seed;
+* source-data checksum when possible;
+* analysis script;
+* complete workflow RDS;
+* report;
+* validation log.
+
+For local release validation, also archive the exact package tarball that passed `R CMD check --as-cran`.
+
+# 19. Recommended project structure
+
+A simple project can use:
+
+```text
+analysis/
+  01_prepare_data.R
+  02_growth_models.R
+  03_uncertainty.R
+  04_report.R
+outputs/
+  agriGrowthFlow_bundle/
+  figures/
+  tables/
+data/
+  raw/
+  processed/
+validation/
+  sessionInfo.txt
+  package_check/
+```
+
+The exact structure can vary.
+
+The important requirement is that raw data, analysis code, and derived outputs are not confused with each other.
+
+# 20. Source-data checksums
+
+Checksums help detect accidental changes in frozen inputs.
+
+The package itself uses SHA-256 checksums for simulated teaching datasets and frozen source snapshots.
+
+A research project can do the same for raw input files.
+
+For example, from a shell:
+
+```text
+sha256sum data/raw/my_growth_data.csv
+```
+
+On Windows PowerShell:
+
+```text
+Get-FileHash data\raw\my_growth_data.csv -Algorithm SHA256
+```
+
+Record the hash in the analysis log.
+
+# 21. Session information
+
+After final analysis, record:
+
+```{r session-info, eval=FALSE}
+sessionInfo()
+```
+
+If `renv` is used, record the lockfile as well.
+
+This helps distinguish a data change from a software-environment change.
+
+# 22. Reporting candidate models
+
+A candidate comparison table should identify:
+
+* model family;
+* number of observations;
+* likelihood parameter count;
+* RSS;
+* RMSE;
+* MAE;
+* AIC;
+* AICc;
+* BIC;
+* delta AICc;
+* Akaike weight when calculated.
+
+Do not report the best AICc model without also checking parameter plausibility and diagnostics [@ArchontoulisMiguez2015].
+
+# 23. Reporting nonlinear traits
+
+Biological traits often provide the most interpretable summary.
+
+Depending on model family, useful quantities can include:
+
+* asymptote;
+* inflection time;
+* response at inflection;
+* maximum absolute growth rate;
+* time of maximum absolute growth rate;
+* time to 10 percent;
+* time to 50 percent;
+* time to 90 percent;
+* area under the observed-support curve.
+
+Report units.
+
+Report uncertainty when it was estimated.
+
+# 24. Reporting smooth trajectories
+
+For smoothers, focus on:
+
+* fitted trajectory;
+* first derivative;
+* second derivative when scientifically relevant;
+* time support;
+* uncertainty method if used;
+* distinction between descriptive population smoothing and repeated-unit inference.
+
+Regression smoothers have a long history in plant-growth analysis [@ShipleyHunt1996].
+
+# 25. Reporting mixed models
+
+For longitudinal mixed models, report:
+
+* fixed-effects structure;
+* random-effects structure;
+* residual correlation structure;
+* variance structure;
+* estimation method;
+* persistent unit;
+* number of units;
+* diagnostic findings.
+
+Do not report repeated observations as if they were independent replicates [@PinheiroBates2000].
+
+# 26. Reporting multiphase models
+
+Report:
+
+* number of phases;
+* phase-ordering constraint;
+* optimization strategy;
+* complete-trajectory inflection or stability analysis;
+* temporal support;
+* whether alternative phase counts were considered.
+
+For a sum of logistic phases, complete-trajectory critical points should not be replaced by component formulas [@MischanEtAl2015].
+
+# 27. Reporting disturbance analyses
+
+For defoliation or biomass-loss experiments, distinguish measured losses from model-estimated growth.
+
+The iterative approach depends on observed losses of total biomass, leaf mass, and leaf area when those events occur [@AntenAckerly2001].
+
+Do not reconstruct a loss event from a smooth curve and then present it as measured data.
+
+# 28. Reporting Bayesian analyses
+
+A minimal Bayesian report should include:
+
+* model family;
+* prior distributions;
+* number of chains;
+* iterations and warmup;
+* backend;
+* R-hat summary;
+* effective sample sizes;
+* divergences;
+* posterior predictive checks;
+* posterior trait summaries;
+* PSIS-LOO diagnostics when model comparison is used.
+
+Predictive stacking can be useful when several models remain plausible, but weights should be interpreted as predictive-combination weights rather than posterior model probabilities [@YaoEtAl2018].
+
+# 29. Reporting bootstrap analyses
+
+State:
+
+* what was resampled;
+* why that resampling unit matches the design;
+* number of replicates;
+* refitting success rate;
+* confidence-interval type;
+* seed;
+* whether the interval summarizes coefficients or derived traits.
+
+The resampling scheme is part of the method, not an implementation detail.
+
+# 30. Reviewer bundle
+
+For manuscript review, a useful bundle can contain:
+
+1. analysis script;
+2. data dictionary;
+3. source-data checksum;
+4. workflow RDS;
+5. audit CSV;
+6. trait table;
+7. candidate comparison;
+8. Markdown analysis report;
+9. session information;
+10. package tarball checksum.
+
+This does not require that raw confidential data be publicly distributed.
+
+Access restrictions can be documented separately.
+
+# 31. Teaching bundle
+
+For teaching, the bundle can be smaller:
+
+* one simulated dataset;
+* one analysis script;
+* one planning-only workflow;
+* one executed workflow;
+* audit table;
+* short interpretation exercise.
+
+Students can compare what changes when the experimental unit is declared incorrectly.
+
+# 32. Do not overwrite outputs silently
+
+`growth_export()` defaults to `overwrite = FALSE`.
+
+This is deliberate.
+
+A reproducible workflow should not silently replace a previous result.
+
+Use a new directory, versioned filename, or explicit overwrite decision.
+
+# 33. File naming
+
+Useful names include:
+
+```text
+sunflower_growth_workflow_2026-08-27.rds
+sunflower_growth_audit_2026-08-27.csv
+sunflower_growth_report_2026-08-27.md
+```
+
+For a formal release, prefer semantic version labels over dates alone.
+
+# 34. Audit before export
+
+A simple final sequence is:
+
+```{r final-sequence, eval=FALSE}
+w <- growth_workflow(...)
+
+audit <- growth_workflow_audit(w)
+print(audit)
+
+stopifnot(!any(audit$status == "FAIL"))
+
+growth_export(
+  w,
+  path = "outputs/agriGrowthFlow_bundle",
+  format = "bundle"
+)
+```
+
+This check is intentionally modest.
+
+Model-specific diagnostics still have to be inspected before release.
+
+# 35. Suggested Methods record
+
+A reproducible Methods note can state:
+
+*Analysis was performed with agriGrowthFlow 1.0.0. The persistent experimental unit and sampling mechanism were declared before fitting. The analysis objective and selected core strategy were stored in a consolidated workflow object. Model-specific diagnostics were reviewed before biological traits were interpreted. The final workflow was audited with `growth_workflow_audit()` and archived as an RDS object together with human-readable tables and a Markdown analysis report.*
+
+Add the actual model family, uncertainty method, and experimental details.
+
+# 36. Suggested data-availability record
+
+If data can be shared:
+
+*The analysis bundle contains the processed data, source checksum, complete agriGrowthFlow workflow object, analysis report, and session information required to reproduce the reported growth summaries.*
+
+If data cannot be shared, state the restriction accurately.
+
+Do not claim open availability when access is restricted.
+
+# 37. Final audit checklist
+
+Before sending results to a collaborator or reviewer:
+
+- [ ] confirm the package version;
+- [ ] confirm the source data file and checksum;
+- [ ] confirm the persistent experimental unit;
+- [ ] confirm the selected strategy;
+- [ ] inspect model-specific diagnostics;
+- [ ] inspect uncertainty diagnostics;
+- [ ] verify units in traits and tables;
+- [ ] inspect report wording for unsupported claims;
+- [ ] save the complete RDS object;
+- [ ] save human-readable tables;
+- [ ] save session information;
+- [ ] record the final package or tarball checksum.
+
+# 38. Take-home message
+
+Reproducibility requires more than saving the final table.
+
+The 1.0.0 release separates three layers:
+
+1. the complete computational object;
+2. human-readable review outputs;
+3. a transparent analysis contract.
+
+Together, these layers make it easier to determine not only what result was obtained, but how that result was produced and what assumptions were declared.

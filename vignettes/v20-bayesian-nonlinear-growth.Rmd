@@ -1,0 +1,508 @@
+---
+title: "Bayesian Nonlinear Plant Growth Models"
+author: "agriGrowthFlow"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Bayesian Nonlinear Plant Growth Models}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+# 1. Purpose and scope
+
+Version 0.4.0 adds an optional Bayesian layer for nonlinear plant-growth models. The implementation uses `brms` as the user-facing Stan interface and keeps all Bayesian dependencies in `Suggests`, so the frequentist and bootstrap layers remain available without Stan. The general multilevel nonlinear capabilities of `brms` are described by @Buerkner2017.
+
+The first Bayesian release is intentionally conservative. It supports three model families whose transformed parameterizations have been explicitly implemented and documented:
+
+- Logistic;
+- Gompertz;
+- Richards.
+
+Other 0.2.0 curve families remain available through the frequentist layer but are refused by `growth_bayes()` in 0.4.0. This is deliberate. A Bayesian implementation is not considered complete merely because a nonlinear equation can be copied into Stan. Priors, parameter support, initialization, derived traits, hierarchy, diagnostics, and posterior prediction all need a coherent parameterization.
+
+# 2. Bayesian growth inference in one equation
+
+Let
+
+\[
+y_i \sim \mathcal{N}(\mu_i,\sigma),
+\]
+
+with
+
+\[
+\mu_i=f(t_i;\boldsymbol{\theta}_i).
+\]
+
+Bayesian inference specifies probability models for the unknown parameters, for example
+
+\[
+\theta_j \sim p(\theta_j),
+\]
+
+and combines those priors with the likelihood:
+
+\[
+p(\boldsymbol{\theta}\mid \mathbf{y})
+\propto
+p(\mathbf{y}\mid \boldsymbol{\theta})
+\,p(\boldsymbol{\theta}).
+\]
+
+The output is a posterior distribution, not a single coefficient vector.
+
+# 3. Why transformed nonlinear parameters are used
+
+Growth parameters such as an asymptote, positive scale, and Richards shape must remain positive. Version 0.4.0 models these quantities on the log scale:
+
+\[
+A = \exp(\eta_A),
+\]
+
+\[
+s = \exp(\eta_s),
+\]
+
+and, for Richards,
+
+\[
+\nu = \exp(\eta_{\nu}).
+\]
+
+This has three advantages:
+
+1. the biological parameter cannot become negative;
+2. fixed and random effects can be modeled on an unconstrained linear-predictor scale;
+3. prior distributions can be specified on a numerically stable transformed scale.
+
+The parameter names exposed by the Bayesian implementation are `log_asym`, `mid`, `log_scale`, and, for Richards, `log_shape`.
+
+# 4. Logistic parameterization
+
+The Bayesian Logistic mean is
+
+\[
+\mu(t)=\frac{\exp(\eta_A)}
+{1+\exp[-(t-m)/\exp(\eta_s)]}.
+\]
+
+The asymptote and scale are positive by construction. The midpoint \(m\) remains on the time scale.
+
+# 5. Gompertz parameterization
+
+The Gompertz mean is
+
+\[
+\mu(t)=\exp(\eta_A)
+\exp\left\{-\exp\left[-\frac{t-m}{\exp(\eta_s)}\right]\right\}.
+\]
+
+The parameter `mid` here is a location parameter associated with the inflection structure of the Gompertz curve. It should not be assumed to have the same biological interpretation as every other model's timing parameter.
+
+# 6. Richards parameterization
+
+A Richards trajectory adds a positive shape parameter. The package uses a transformed `log_shape` predictor and maps it to
+
+\[
+\nu=\exp(\eta_\nu)>0.
+\]
+
+This extra flexibility can represent asymmetry that Logistic cannot. It also increases posterior dependence among nonlinear parameters and can demand more information from the data.
+
+# 7. Start from design, not from Stan
+
+Bayesian computation does not remove the need to identify the experimental unit. The same package rule applies:
+
+> Sampling design and persistent unit are declared before the inferential engine is chosen.
+
+For repeated measurements, a plant-level random effect can represent persistent between-plant variation. For destructive sampling, the persistent unit is normally the plot, not the individual plant harvested on one date.
+
+The safest workflow is to create an `agri_growth_data` object first when the design is not a simple independent curve.
+
+# 8. Inspect the default prior before fitting
+
+```{r prior-logistic}
+sun <- growth_example_data("sunflower_sigmoid")
+sun1 <- subset(sun, cultivar == unique(sun$cultivar)[1])
+
+p_log <- growth_prior(
+  sun1,
+  model = "logistic",
+  time = "day",
+  response = "biomass_g"
+)
+
+p_log
+```
+
+`growth_prior()` derives weakly informative, data-scaled prior templates. Data scaling makes the default more useful across biomass, height, leaf area, and other positive responses, but it does not make the prior scientifically informative.
+
+The prior table shows:
+
+- nonlinear parameter;
+- intercept or coefficient role;
+- prior class;
+- prior expression;
+- transformation back to the biological scale.
+
+# 9. Inspect all three supported model templates
+
+```{r prior-templates}
+growth_prior(sun1, "logistic", time = "day", response = "biomass_g")
+growth_prior(sun1, "gompertz", time = "day", response = "biomass_g")
+growth_prior(sun1, "richards", time = "day", response = "biomass_g")
+```
+
+The Richards prior includes `log_shape`, which is absent from Logistic and Gompertz.
+
+# 10. What a biologically informed prior could express
+
+Suppose previous experiments indicate that mature biomass is usually between 180 and 350 g plant^-1. One can translate that information to the log-asymptote scale rather than placing a Normal prior directly on a parameter that must be positive.
+
+A prior can encode:
+
+- plausible final size;
+- plausible timing of rapid growth;
+- plausible transition duration;
+- plausible between-unit variability.
+
+It should not be chosen after looking at the final posterior solely to make the posterior look convenient.
+
+# 11. Prior predictive checks come before posterior interpretation
+
+A prior is easiest to understand by simulating the data it implies. `growth_prior_predict()` fits a prior-only `brms` model using `sample_prior = "only"`.
+
+```{r prior-predict, eval=FALSE}
+prior_fit <- growth_prior_predict(
+  sun1,
+  model = "logistic",
+  time = "day",
+  response = "biomass_g",
+  prior = p_log,
+  chains = 4,
+  iter = 1000,
+  warmup = 500,
+  seed = 4001
+)
+
+growth_pp_check(prior_fit, type = "dens_overlay", ndraws = 100)
+```
+
+The purpose is not to force prior simulations to resemble the observed data exactly. The purpose is to identify implausible consequences such as biomass many orders of magnitude beyond the biological system or transition times far outside any meaningful temporal range.
+
+# 12. Fit a population-level Bayesian Logistic curve
+
+```{r bayes-logistic, eval=FALSE}
+b_log <- growth_bayes(
+  sun1,
+  model = "logistic",
+  time = "day",
+  response = "biomass_g",
+  group_effects = "none",
+  random = "none",
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 4002
+)
+
+b_log
+```
+
+For publication-quality inference, sampling length should be determined from convergence and effective sample size rather than copied mechanically from this example.
+
+# 13. Stan backend
+
+The default backend option is `rstan`. A user can request `cmdstanr`:
+
+```{r cmdstanr, eval=FALSE}
+b_log_cmd <- growth_bayes(
+  sun1,
+  model = "logistic",
+  time = "day",
+  response = "biomass_g",
+  backend = "cmdstanr",
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 4003
+)
+```
+
+If `cmdstanr` is requested but unavailable, the package stops rather than silently changing backend.
+
+# 14. Treatment effects on nonlinear parameters
+
+A major advantage of nonlinear multilevel modeling is that treatment effects can enter biologically interpretable parameters rather than only the response at each time.
+
+```{r group-fit, eval=FALSE}
+b_group <- growth_bayes(
+  sun,
+  model = "gompertz",
+  time = "day",
+  response = "biomass_g",
+  group = "cultivar",
+  group_effects = "all",
+  random = "none",
+  chains = 4,
+  iter = 2500,
+  warmup = 1250,
+  cores = 4,
+  seed = 4010
+)
+```
+
+With `group_effects = "all"`, the cultivar can influence each nonlinear parameter. This is flexible, but flexibility should match the sample size and scientific hypothesis.
+
+# 15. Hierarchical repeated-plant example
+
+The bean teaching dataset contains repeated observations of the same plants. A persistent plant effect can be represented hierarchically.
+
+```{r repeated-data}
+bean <- growth_example_data("bean_repeated")
+```
+
+```{r repeated-bayes, eval=FALSE}
+b_bean <- growth_bayes(
+  bean,
+  model = "richards",
+  time = "day",
+  response = "height_cm",
+  group = "water_regime",
+  unit = "plant_id",
+  group_effects = "all",
+  random = "asym",
+  chains = 4,
+  iter = 3000,
+  warmup = 1500,
+  cores = 4,
+  seed = 4011
+)
+```
+
+In 0.4.0, `random = "auto"` adds a persistent-unit random effect to the transformed asymptote when repeated units are available. Other templates are `none`, `asym`, `timing`, and `all`.
+
+A maximal nonlinear random-effects structure is not automatically desirable. Nonlinear hierarchy can be weakly identified and computationally demanding.
+
+# 16. Plain data frames and design responsibility
+
+When `growth_bayes()` receives a plain data frame with `unit =`, that unit is treated as a stable repeated unit. If the data arise from destructive sampling, create an `agri_growth_data` object with the correct sampling declaration first.
+
+This safeguard prevents a convenient function argument from overriding the actual experimental design.
+
+# 17. User-defined nonlinear-parameter formulas
+
+Advanced users can override the package templates with `nlpar_formulas`. For example, a treatment could affect timing but not asymptote.
+
+```{r custom-formula, eval=FALSE}
+custom <- list(
+  log_asym = ~ 1,
+  mid = ~ 1 + agf_group,
+  log_scale = ~ 1
+)
+
+b_custom <- growth_bayes(
+  sun,
+  model = "logistic",
+  time = "day",
+  response = "biomass_g",
+  group = "cultivar",
+  group_effects = "none",
+  nlpar_formulas = custom,
+  random = "none"
+)
+```
+
+The internal standardized names `agf_time`, `agf_y`, `agf_group`, and `agf_unit` are used in these formulas.
+
+# 18. Posterior predictive checks
+
+After sampling, a posterior predictive check evaluates whether replicated data drawn from the fitted model reproduce relevant features of the observed data.
+
+```{r pp, eval=FALSE}
+growth_pp_check(b_log, type = "dens_overlay", ndraws = 100)
+growth_pp_check(b_log, type = "scatter_avg", ndraws = 100)
+```
+
+A posterior predictive check is not a formal proof that a model is correct. It is a structured attempt to detect discrepancies between observed and model-generated data.
+
+# 19. MCMC diagnostics are mandatory
+
+Version 0.4.0 summarizes rank-normalized \(\hat R\), bulk effective sample size, tail effective sample size, and divergent transitions through `growth_bayes_diagnose()`. The modern diagnostic framework follows @VehtariEtAl2021.
+
+```{r diagnostics, eval=FALSE}
+diag <- growth_bayes_diagnose(b_log)
+diag
+head(diag$parameters)
+```
+
+The package's default warning threshold is
+
+\[
+\hat R > 1.01,
+\]
+
+and it also flags low effective sample sizes or any divergent transitions. These are diagnostic gates, not automatic repairs.
+
+# 20. Divergent transitions
+
+A divergence can signal difficult posterior geometry. Increasing `adapt_delta` may reduce some divergences, but the scientific response should include inspecting parameterization, prior strength, posterior dependence, and whether the model is too complex for the data.
+
+Do not use repeated increases in `adapt_delta` as a substitute for model understanding.
+
+# 21. Effective sample size
+
+MCMC iterations are autocorrelated. The effective sample size estimates how much independent information the draws contain for a parameter or tail quantity.
+
+A chain can have thousands of stored draws and still provide limited effective information for a difficult parameter. This is especially relevant for Richards shape parameters and complex nonlinear random effects.
+
+# 22. Posterior biological traits
+
+The package does not ask the user to interpret transformed Stan coefficients directly. `growth_posterior_traits()` recovers biological traits for every selected posterior draw.
+
+```{r posterior-traits, eval=FALSE}
+traits <- growth_posterior_traits(
+  b_log,
+  ndraws = 1000,
+  probs = c(0.025, 0.975),
+  seed = 4020
+)
+
+traits
+```
+
+For Logistic, Gompertz, and Richards, timing and maximum-rate traits use analytic transformations of the posterior nonlinear parameters where implemented. AUC is integrated numerically over the observed time support.
+
+# 23. Population-level versus unit-specific traits
+
+The default
+
+```r
+re_formula = NA
+```
+
+excludes unit-level random effects and produces population-level summaries.
+
+For a fitted unit, one can include the random effects:
+
+```{r unit-traits, eval=FALSE}
+growth_posterior_traits(
+  b_bean,
+  group = "well_watered",
+  unit = bean$plant_id[1],
+  re_formula = NULL,
+  ndraws = 1000
+)
+```
+
+Population-level and unit-specific trajectories answer different questions and should not be mixed in one table without clear labels.
+
+# 24. Posterior probabilities for agronomic contrasts
+
+The most direct Bayesian interpretation often uses the posterior draws themselves. If treatment-specific `t50` draws are available, one can calculate
+
+\[
+P(t_{50,A}<t_{50,B}\mid y).
+\]
+
+That probability is conditional on the model, priors, and observed data. It is not the same as a frequentist p-value.
+
+Version 0.4.0 returns summarized traits by scenario. Future versions can add direct posterior contrast helpers without changing the underlying fit object.
+
+# 25. Prior sensitivity
+
+A good nonlinear Bayesian analysis should examine whether scientifically plausible alternative priors materially change key conclusions, particularly when:
+
+- observations do not extend near the asymptote;
+- the Richards shape is weakly identified;
+- treatment groups are small;
+- random-effect variances are near zero;
+- extrapolated timing traits are central to the conclusion.
+
+Prior sensitivity is a scientific analysis, not evidence that priors are undesirable.
+
+# 26. Bootstrap versus Bayesian intervals
+
+A bootstrap confidence interval and a Bayesian credible interval have different definitions.
+
+A 95% Bayesian credible interval directly summarizes 95% of the posterior probability under the specified model and prior. A 95% frequentist confidence procedure concerns long-run coverage under repeated sampling according to the procedure.
+
+The two intervals can be numerically similar or different. They should never be renamed as if they have the same interpretation.
+
+# 27. What not to do
+
+Do not:
+
+- fit a Bayesian model without inspecting priors;
+- skip prior predictive simulation because the sampler converged;
+- report posterior summaries when \(\hat R\), ESS, or divergences indicate sampling problems;
+- make every nonlinear parameter treatment-specific by default;
+- add all random effects merely because the software accepts the formula;
+- interpret transformed `log_asym` as biomass without applying the exponential transformation;
+- use prior-only objects for LOO comparison;
+- treat posterior predictive agreement as proof of causal validity.
+
+# 28. Recommended Methods reporting
+
+A Bayesian growth Methods section should identify:
+
+1. growth family and mathematical parameterization;
+2. response distribution;
+3. fixed treatment effects on nonlinear parameters;
+4. persistent-unit random effects;
+5. prior distributions and their transformed scales;
+6. number of chains, iterations, warmup, and backend;
+7. sampler-control settings;
+8. convergence and ESS criteria;
+9. prior and posterior predictive checks;
+10. biological posterior traits reported.
+
+# 29. Recommended Results reporting
+
+Prefer statements about biological quantities:
+
+> Posterior inference was summarized for the time to 50% of fitted asymptotic biomass and for maximum absolute growth rate. Population-level summaries excluded unit-specific random effects. MCMC diagnostics were evaluated before trait interpretation, and posterior predictive simulations were compared with the observed trajectory.
+
+Insert the actual posterior estimates and credible intervals only after final sampling diagnostics pass.
+
+# 30. Computational reproducibility
+
+Bayesian results depend on software versions and the Stan toolchain. Record:
+
+- `agriGrowthFlow` version;
+- `brms` version;
+- `posterior` version;
+- Stan backend and version;
+- R version;
+- seed;
+- model formulas;
+- priors;
+- sampler controls.
+
+For long-running analyses, save the fitted object rather than recompiling the model for every figure.
+
+# 31. Summary
+
+The Bayesian layer in 0.4.0 follows five principles:
+
+1. use positive-parameter transformations explicitly;
+2. let design determine treatment and persistent-unit hierarchy;
+3. inspect priors through prior predictive simulation;
+4. require sampler diagnostics before interpretation;
+5. translate posterior nonlinear parameters into biological growth traits.
+
+The next vignette addresses predictive comparison, PSIS-LOO, and model averaging.
+
+# References

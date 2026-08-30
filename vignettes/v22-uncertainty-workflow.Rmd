@@ -1,0 +1,1073 @@
+---
+title: "agriGrowthFlow 0.4.0 Uncertainty Tutorial: Bootstrap, Bayesian Growth, LOO, and Decision-Oriented Traits"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 0.4.0 Uncertainty Tutorial: Bootstrap, Bayesian Growth, LOO, and Decision-Oriented Traits}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+# 1. Tutorial purpose
+
+Version 0.4.0 adds an uncertainty layer to the design-aware growth workflow developed in versions 0.1.0 to 0.3.0. The objective is not to replace earlier analyses with a single more complicated model. The objective is to make uncertainty explicit at every stage where a scientific conclusion can change:
+
+- sampling variation;
+- nonlinear parameter estimation;
+- biological trait transformation;
+- curve-family choice;
+- prior assumptions;
+- hierarchical variability;
+- posterior computation;
+- out-of-sample predictive performance;
+- model-form uncertainty.
+
+This tutorial integrates the complete sequence.
+
+The frequentist resampling framework builds on the principles described by @DavisonHinkley1997 and the wild-bootstrap theory discussed by @Mammen1992. Bayesian nonlinear modeling uses the `brms` framework described by @Buerkner2017. MCMC diagnostics follow @VehtariEtAl2021, PSIS-LOO follows @VehtariGelmanGabry2017, and predictive stacking follows @YaoEtAl2018.
+
+# 2. What 0.4.0 adds
+
+The new public functions are:
+
+- `growth_boot()`;
+- `growth_boot_ci()`;
+- `growth_boot_traits()`;
+- `growth_selection_stability()`;
+- `growth_prior()`;
+- `growth_bayes()`;
+- `growth_prior_predict()`;
+- `growth_pp_check()`;
+- `growth_bayes_diagnose()`;
+- `growth_posterior_traits()`;
+- `growth_loo()`;
+- `growth_model_average()`.
+
+These functions form two complementary branches:
+
+```text
+fitted parametric curve
+        |
+        +---- bootstrap branch
+        |       |
+        |       +-- coefficient uncertainty
+        |       +-- trait uncertainty
+        |       +-- model-selection stability
+        |
+        +---- Bayesian branch
+                |
+                +-- priors and prior prediction
+                +-- nonlinear hierarchy
+                +-- MCMC diagnostics
+                +-- posterior traits
+                +-- PSIS-LOO
+                +-- model averaging
+```
+
+# 3. The invariant first step: identify the experimental unit
+
+No uncertainty method can repair an incorrect experimental unit.
+
+The core distinction remains:
+
+- repeated measurement: the same persistent plant or plot is observed over time;
+- destructive sampling: an individual harvested once disappears, so a higher-level plot may be the persistent unit;
+- independent series: no repeated persistent unit is represented.
+
+The bootstrap resampling unit and Bayesian random-effects unit should be consequences of that structure.
+
+# 4. Dataset 1: a single sigmoidal sunflower curve
+
+The first example isolates one simulated cultivar.
+
+```{r sunflower}
+sun <- growth_example_data("sunflower_sigmoid")
+sun1 <- subset(sun, cultivar == unique(sun$cultivar)[1])
+
+head(sun1)
+```
+
+Plot raw observations before fitting.
+
+```{r sunflower-plot, fig.width=7, fig.height=4.5}
+growth_plot(sun1, time = "day", response = "biomass_g")
+```
+
+# 5. Fit competing frequentist curves
+
+```{r frequentist-fits}
+f_log <- growth_fit(
+  sun1,
+  "logistic",
+  time = "day",
+  response = "biomass_g",
+  n_start = 2,
+  engine = "nls"
+)
+
+f_gom <- growth_fit(
+  sun1,
+  "gompertz",
+  time = "day",
+  response = "biomass_g",
+  n_start = 2,
+  engine = "nls"
+)
+
+f_rich <- growth_fit(
+  sun1,
+  "richards",
+  time = "day",
+  response = "biomass_g",
+  n_start = 3,
+  engine = "nls"
+)
+```
+
+A candidate comparison can be made on the same observations.
+
+```{r compare}
+growth_compare(list(f_log, f_gom, f_rich))
+```
+
+Model selection is only one input to interpretation. The next step is to ask whether the biologically relevant traits are sensitive to model and sample.
+
+# 6. Derived biological traits
+
+```{r traits}
+growth_traits(f_log)
+growth_traits(f_gom)
+growth_traits(f_rich)
+```
+
+The common trait names make it easier to compare growth timing and rate across families even though the internal model coefficients differ.
+
+# 7. Bootstrap the complete nonlinear fit
+
+```{r boot-log}
+b_log <- growth_boot(
+  f_log,
+  R = 40,
+  method = "case",
+  seed = 6001,
+  n_start = 1,
+  engine = "nls"
+)
+
+b_log
+```
+
+A production analysis should use substantially more resamples after confirming the refitting pipeline.
+
+# 8. Audit failed refits
+
+```{r failed}
+with(b_log$records, table(success))
+subset(b_log$records, !success)
+```
+
+Nonlinear fit failures are retained, not discarded silently.
+
+# 9. Parameter uncertainty
+
+```{r parameter-ci}
+growth_boot_ci(
+  b_log,
+  source = "coefficients",
+  type = "percentile"
+)
+```
+
+This is useful for model diagnostics and parameter reporting, but the most interpretable results often come next.
+
+# 10. Trait uncertainty
+
+```{r biological-ci}
+growth_boot_traits(
+  b_log,
+  traits = c(
+    "t10",
+    "t50",
+    "t90",
+    "maximum_absolute_rate",
+    "auc_observed_support"
+  )
+)
+```
+
+Each interval is generated after recalculating the trait in every successful resampled fit.
+
+# 11. A derived interval from joint bootstrap draws
+
+Suppose the target estimand is the 10% to 90% transition duration:
+
+\[
+D_{10:90}=t_{90}-t_{10}.
+\]
+
+```{r transition}
+ok <- b_log$records$success
+d1090 <- b_log$traits$t90[ok] - b_log$traits$t10[ok]
+quantile(d1090, c(0.025, 0.5, 0.975), na.rm = TRUE)
+```
+
+This propagates covariance between `t10` and `t90` automatically.
+
+# 12. Alternative resampling assumptions
+
+A residual bootstrap retains the observed time design:
+
+```{r residual-boot}
+b_res <- growth_boot(
+  f_log,
+  R = 40,
+  method = "residual",
+  seed = 6002,
+  engine = "nls"
+)
+```
+
+A wild bootstrap can be used when the error spread is not plausibly exchangeable:
+
+```{r wild-boot}
+b_wild <- growth_boot(
+  f_log,
+  R = 40,
+  method = "wild",
+  wild_weights = "mammen",
+  seed = 6003,
+  engine = "nls"
+)
+```
+
+Compare the scientific conclusion, not just interval width.
+
+```{r resampling-comparison}
+growth_boot_traits(b_res, traits = "t50")
+growth_boot_traits(b_wild, traits = "t50")
+```
+
+# 13. Model-selection stability
+
+```{r stability}
+stab <- growth_selection_stability(
+  sun1,
+  models = c("logistic", "gompertz", "richards"),
+  time = "day",
+  response = "biomass_g",
+  R = 40,
+  method = "case",
+  n_start = 2,
+  seed = 6010,
+  engine = "nls"
+)
+
+stab
+```
+
+The frequency table answers how stable the candidate winner is under resampling. It is not a table of posterior model probabilities.
+
+# 14. Decision point: is one curve family sufficient?
+
+Before moving to Bayesian modeling, summarize three pieces of evidence:
+
+1. Which candidate fits the observed data best according to the declared criterion?
+2. How stable is that selection under resampling?
+3. Do common biological traits change materially across plausible candidates?
+
+If all three are stable, one selected family may be sufficient for the main scientific message. If not, model-form uncertainty deserves explicit treatment.
+
+# 15. Bayesian branch: inspect priors
+
+```{r prior-tables}
+p_log <- growth_prior(sun1, "logistic", time = "day", response = "biomass_g")
+p_gom <- growth_prior(sun1, "gompertz", time = "day", response = "biomass_g")
+
+p_log
+p_gom
+```
+
+`growth_prior()` returns a readable specification before compilation.
+
+# 16. Prior predictive workflow
+
+```{r prior-predictive, eval=FALSE}
+prior_only <- growth_prior_predict(
+  sun1,
+  "logistic",
+  time = "day",
+  response = "biomass_g",
+  prior = p_log,
+  chains = 4,
+  iter = 1000,
+  warmup = 500,
+  seed = 6020
+)
+
+growth_pp_check(prior_only, type = "dens_overlay", ndraws = 100)
+```
+
+If the prior generates impossible trajectories, revise it before using the observed data for posterior inference.
+
+# 17. Bayesian population-level Logistic
+
+```{r bayes-logistic, eval=FALSE}
+bayes_log <- growth_bayes(
+  sun1,
+  "logistic",
+  time = "day",
+  response = "biomass_g",
+  group_effects = "none",
+  random = "none",
+  chains = 4,
+  iter = 2500,
+  warmup = 1250,
+  cores = 4,
+  seed = 6021
+)
+```
+
+# 18. Bayesian population-level Gompertz
+
+```{r bayes-gompertz, eval=FALSE}
+bayes_gom <- growth_bayes(
+  sun1,
+  "gompertz",
+  time = "day",
+  response = "biomass_g",
+  group_effects = "none",
+  random = "none",
+  chains = 4,
+  iter = 2500,
+  warmup = 1250,
+  cores = 4,
+  seed = 6022
+)
+```
+
+Both models use identical prepared observations, which is essential for later LOO weighting.
+
+# 19. Sampler diagnostics gate
+
+```{r sampler-gate, eval=FALSE}
+diag_log <- growth_bayes_diagnose(bayes_log)
+diag_gom <- growth_bayes_diagnose(bayes_gom)
+
+diag_log
+diag_gom
+```
+
+Do not continue to trait or LOO interpretation if the sampler diagnostics are not acceptable.
+
+# 20. Posterior predictive gate
+
+```{r posterior-predictive, eval=FALSE}
+growth_pp_check(bayes_log, type = "dens_overlay", ndraws = 100)
+growth_pp_check(bayes_gom, type = "dens_overlay", ndraws = 100)
+```
+
+A model can sample perfectly while fitting the data poorly. Computational diagnostics and model adequacy address different questions.
+
+# 21. Posterior biological traits
+
+```{r posterior-trait-table, eval=FALSE}
+post_log <- growth_posterior_traits(
+  bayes_log,
+  ndraws = 1000,
+  seed = 6030
+)
+
+post_gom <- growth_posterior_traits(
+  bayes_gom,
+  ndraws = 1000,
+  seed = 6031
+)
+
+post_log
+post_gom
+```
+
+Posterior traits are summarized on interpretable scales. A transformed Stan coefficient should not be copied directly into an agronomic results table when a biological trait is available.
+
+# 22. Compare bootstrap and posterior uncertainty carefully
+
+One can place a bootstrap interval and posterior credible interval in the same discussion, but their definitions differ.
+
+Questions to ask:
+
+- Are both centered on similar biological values?
+- Does one reveal substantial asymmetry?
+- Are posterior results sensitive to priors?
+- Does the bootstrap have a high nonlinear refit-failure rate?
+- Are both conditional on the same curve family?
+
+Agreement can increase confidence in the numerical stability of the conclusion, but it does not erase the different inferential meanings.
+
+# 23. PSIS-LOO
+
+```{r loo, eval=FALSE}
+loo_log <- growth_loo(bayes_log)
+loo_gom <- growth_loo(bayes_gom)
+
+loo_log
+loo_gom
+```
+
+Inspect Pareto-k values, not only total expected log predictive density.
+
+# 24. Stacking weights
+
+```{r stacking-weights, eval=FALSE}
+avg_weights <- growth_model_average(
+  bayes_log,
+  bayes_gom,
+  method = "stacking",
+  type = "weights"
+)
+
+avg_weights
+```
+
+These weights optimize a predictive mixture. They are not evidence that one model is literally true with the corresponding probability.
+
+# 25. Model-averaged expected trajectory
+
+```{r stacking-epred, eval=FALSE}
+avg_epred <- growth_model_average(
+  bayes_log,
+  bayes_gom,
+  method = "stacking",
+  type = "epred",
+  ndraws = 2000,
+  seed = 6040
+)
+
+head(avg_epred$prediction)
+```
+
+The output preserves uncertainty across both posterior draws and model choice in the predictive mixture.
+
+# 26. Predictive interval for a future observation
+
+```{r stacking-predict, eval=FALSE}
+avg_predict <- growth_model_average(
+  bayes_log,
+  bayes_gom,
+  method = "stacking",
+  type = "predict",
+  ndraws = 2000,
+  seed = 6041
+)
+```
+
+Use this when the target is a future observed biomass rather than the expected mean trajectory.
+
+# 27. Dataset 2: repeated bean plants
+
+The next example changes the experimental structure, so the uncertainty strategy must change with it.
+
+```{r bean-data}
+bean <- growth_example_data("bean_repeated")
+gb <- growth_data(
+  bean,
+  time = "day",
+  sampling = "repeated",
+  experimental_unit = "plant_id",
+  plant = "plant_id",
+  treatment = "water_regime",
+  block = "block",
+  leaf_area = "projected_leaf_area_m2"
+)
+
+growth_validate(gb)
+```
+
+# 28. Frequentist longitudinal analysis remains relevant
+
+Version 0.3.0 can fit a polynomial mixed model that explicitly represents repeated-plant dependence.
+
+```{r bean-mixed, eval=FALSE}
+mix <- growth_mixed(
+  bean,
+  time = "day",
+  response = "height_cm",
+  unit = "plant_id",
+  group = "water_regime",
+  block = "block",
+  degree = 2,
+  random_degree = 1,
+  correlation = "car1"
+)
+
+growth_mixed_diagnose(mix)
+```
+
+The Bayesian nonlinear layer is not intended to make this approach obsolete. It answers a different model-form question.
+
+# 29. Hierarchical Bayesian growth
+
+```{r bean-bayes, eval=FALSE}
+bayes_bean <- growth_bayes(
+  gb,
+  model = "richards",
+  response = "height_cm",
+  group_effects = "all",
+  random = "asym",
+  chains = 4,
+  iter = 3000,
+  warmup = 1500,
+  cores = 4,
+  seed = 6050
+)
+```
+
+Here each plant can deviate in transformed asymptote while the population-level nonlinear parameters vary with water regime.
+
+# 30. Population-level treatment traits
+
+```{r bean-pop-traits, eval=FALSE}
+growth_posterior_traits(
+  bayes_bean,
+  group = levels(factor(bean$water_regime)),
+  re_formula = NA,
+  ndraws = 1000,
+  seed = 6051
+)
+```
+
+These summaries concern the treatment-level expected curve after excluding unit-specific random deviations.
+
+# 31. Unit-specific trait summaries
+
+```{r bean-unit-traits, eval=FALSE}
+first_plant <- bean$plant_id[1]
+first_regime <- bean$water_regime[bean$plant_id == first_plant][1]
+
+growth_posterior_traits(
+  bayes_bean,
+  group = first_regime,
+  unit = first_plant,
+  re_formula = NULL,
+  ndraws = 1000,
+  seed = 6052
+)
+```
+
+A unit-specific curve is useful for studying heterogeneity but should not replace treatment-level inference when the scientific question concerns a population of plants.
+
+# 32. Cluster bootstrap concept for repeated units
+
+If a single pooled nonlinear curve is used descriptively on repeated trajectories, the bootstrap should resample whole plants rather than individual rows.
+
+```{r bean-cluster-concept, eval=FALSE}
+# Fit only after defining the scientific pooling target.
+# A cluster bootstrap would use method = "cluster" so the whole plant trajectory
+# is resampled as one unit.
+```
+
+Do not use the existence of a cluster bootstrap as justification for ignoring a needed hierarchical mean/covariance model.
+
+# 33. Dataset 3: destructive maize harvests
+
+```{r maize-data}
+maize <- growth_example_data("maize_destructive")
+gm <- growth_data(
+  maize,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  treatment = "nitrogen",
+  block = "block",
+  total_mass = "total_mass_g",
+  leaf_area = "leaf_area_m2"
+)
+
+growth_plan(gm)
+```
+
+The harvested plants themselves are not longitudinal subjects. The plot is the persistent experimental unit.
+
+# 34. Why this matters for uncertainty
+
+For destructive sampling:
+
+- row-wise bootstrap can overstate independent information;
+- a plant-level random intercept is scientifically inappropriate because each plant is seen once;
+- plot-level aggregation or hierarchy preserves the actual randomization structure;
+- treatment inference should reflect plot replication, not the number of harvested plants.
+
+This is a central reason `agriGrowthFlow` keeps design metadata in the data object.
+
+# 35. Uncertainty hierarchy
+
+A useful conceptual hierarchy is:
+
+```text
+measurement uncertainty
+      ↓
+within-unit temporal variation
+      ↓
+between-unit variation
+      ↓
+nonlinear parameter uncertainty
+      ↓
+derived-trait uncertainty
+      ↓
+curve-family uncertainty
+      ↓
+predictive uncertainty
+```
+
+Not every experiment requires a model for every level. The analyst should identify which levels are supported by the design and relevant to the scientific question.
+
+# 36. Confidence intervals, credible intervals, and prediction intervals
+
+These terms should remain distinct.
+
+| Interval | Main interpretation |
+|---|---|
+| Bootstrap confidence interval | uncertainty of a procedure under resampling |
+| Bayesian credible interval | posterior probability interval conditional on model and priors |
+| Expected-response interval | uncertainty around the mean fitted trajectory |
+| Predictive interval | uncertainty for a future observed response |
+
+A manuscript should use the correct name consistently.
+
+# 37. Uncertainty for an agronomic threshold
+
+Suppose the management target is the time at which fitted biomass reaches 150 g plant^-1. In the frequentist parametric layer:
+
+```{r threshold}
+growth_time_to(f_log, target = 150)
+```
+
+To obtain uncertainty, calculate the same threshold in every bootstrap refit retained with `keep_fits = TRUE`, or use an analytic trait when the target corresponds to a built-in fraction of asymptote.
+
+This illustrates a general rule: define the decision estimand first, then select an uncertainty method that propagates to that estimand.
+
+# 38. Uncertainty should not be selected by p-value
+
+The choice among bootstrap, mixed models, Bayesian hierarchy, or flexible smoothing should follow:
+
+- design;
+- response distribution;
+- dependence;
+- curve shape;
+- scientific estimand;
+- extrapolation requirement;
+- information available for priors;
+- computational diagnostics.
+
+Choosing the method that yields the smallest p-value or narrowest interval invalidates the inferential rationale.
+
+# 39. Missing data
+
+Missing observations are not automatically ignorable. Bayesian and mixed models can use unbalanced observed trajectories under their likelihood assumptions, but that does not prove that the missingness mechanism is benign.
+
+Document:
+
+- why measurements are missing;
+- whether plant death caused missingness;
+- whether late-stage observations are selectively absent;
+- whether destructive subsampling remained randomized;
+- whether treatment affects missingness.
+
+# 40. Outliers and influential growth phases
+
+An extreme early harvest and an extreme late harvest can affect nonlinear parameters differently. Late observations often carry disproportionate information about the asymptote.
+
+Do not remove an observation solely because its removal improves convergence. Investigate measurement error, protocol deviations, and biological plausibility, then document any exclusion rule independently of the preferred result.
+
+# 41. Prior information from previous experiments
+
+Bayesian growth analysis can formally reuse knowledge from prior experiments, but historical information should be transported carefully.
+
+Questions include:
+
+- same genotype?
+- same environment?
+- same measurement scale?
+- same developmental window?
+- same experimental unit?
+- similar stress conditions?
+
+A strong prior from an agronomically different system can be more misleading than a weak prior.
+
+# 42. Model extrapolation
+
+A sigmoid model can estimate an asymptote even when the experiment ends before the observed curve levels off. The resulting parameter may be statistically estimable but prior-sensitive and biologically uncertain.
+
+Always distinguish:
+
+- interpolation inside observed support;
+- modest prediction near support;
+- long-range extrapolation toward a fitted asymptote.
+
+The package names AUC as `auc_observed_support` to reinforce this distinction.
+
+# 43. Uncertainty in maximum growth rate
+
+The maximum absolute rate is a derivative-based quantity. It can be sensitive to both curve family and local data density.
+
+Recommended checks:
+
+1. bootstrap its value within the selected parametric family;
+2. compare it across plausible parametric families;
+3. compare with `growth_smooth_traits()` from the flexible 0.3.0 layer;
+4. inspect whether the observed time grid actually covers the estimated maximum-rate region.
+
+# 44. Parametric and smooth derivatives
+
+A parametric model shares information globally through a small parameter vector. A smoother estimates a flexible trajectory and derivative with fewer structural assumptions about exact shape.
+
+If both methods imply the same period of rapid growth, the conclusion is less dependent on a specific functional form. If they disagree, investigate why before selecting one result.
+
+# 45. Functional growth variation and uncertainty
+
+The 0.3.0 FPCA layer identifies dominant modes of curve variation. Version 0.4.0 does not yet provide bootstrap confidence regions for FPCA eigenfunctions. That remains outside the current implementation.
+
+Do not imply that `growth_boot()` resamples `growth_fpca()` objects. It currently requires an `agri_growth_fit` from the parametric layer.
+
+This explicit limitation prevents overclaiming package capabilities.
+
+# 46. Current Bayesian model-family limitation
+
+Version 0.4.0 Bayesian fitting supports only:
+
+- Logistic;
+- Gompertz;
+- Richards.
+
+Weibull, von Bertalanffy, Chapman-Richards, beta growth, and expolinear remain available in the frequentist layer. Their Bayesian parameterizations may be added later only after prior, hierarchy, and trait behavior are validated.
+
+# 47. Current likelihood scope
+
+The default is Gaussian response error. `growth_bayes()` forwards a `family` argument to `brms`, but a non-Gaussian family must be scientifically compatible with the nonlinear mean and response scale.
+
+A custom family choice is an advanced analysis. It should not be changed merely to obtain convergence.
+
+# 48. Current residual-correlation scope
+
+Version 0.4.0 Bayesian templates emphasize nonlinear parameter hierarchy. The dedicated 0.3.0 `growth_mixed()` layer remains the explicit package interface for AR(1), CAR(1), and heterogeneous residual variance structures.
+
+A future Bayesian version may add design-aware autocorrelation formulas after comprehensive validation.
+
+# 49. Computational cost
+
+Bootstrap and MCMC can both be expensive because each involves repeated nonlinear work.
+
+Practical development sequence:
+
+1. validate the data object;
+2. fit a simple deterministic curve;
+3. inspect starts and convergence;
+4. run a small bootstrap or short Bayesian smoke test;
+5. correct structural problems;
+6. only then increase resamples or MCMC iterations.
+
+This avoids spending hours sampling a scientifically misdeclared model.
+
+# 50. Recommended final-analysis object bundle
+
+For a reproducible project, save:
+
+```text
+analysis/
+  data_clean.rds
+  growth_design.rds
+  frequentist_fits.rds
+  bootstrap_object.rds
+  bayesian_fits.rds
+  loo_objects.rds
+  sessionInfo.txt
+  analysis_script.R
+  figures/
+  tables/
+```
+
+The package itself does not force this directory structure, but preserving intermediate objects supports auditing and manuscript revision.
+
+# 51. Recommended frequentist Methods checklist
+
+State:
+
+- persistent experimental unit;
+- curve family;
+- fitting engine;
+- starting-value strategy;
+- bootstrap method;
+- resampling unit;
+- number of requested replicates;
+- successful replicate rate;
+- interval type;
+- derived biological traits;
+- model-selection stability method when used.
+
+# 52. Recommended Bayesian Methods checklist
+
+State:
+
+- curve parameterization;
+- response family;
+- priors;
+- treatment formulas;
+- random-effects formulas;
+- chains, iterations, warmup, cores;
+- backend;
+- sampler controls;
+- \(\hat R\) and ESS thresholds;
+- divergence assessment;
+- prior predictive checks;
+- posterior predictive checks;
+- PSIS-LOO diagnostics;
+- weighting method when averaging models.
+
+# 53. Recommended figure set
+
+A scientifically informative growth paper often benefits from several complementary panels rather than one fitted line:
+
+1. observed trajectories or harvest distributions;
+2. fitted expected trajectories with uncertainty;
+3. residual or posterior predictive diagnostic;
+4. biological trait interval plot;
+5. treatment-specific timing/rate comparison;
+6. model-selection stability or stacking weights when model form is uncertain.
+
+Observed data should remain visible whenever possible.
+
+# 54. Recommended table set
+
+Avoid a single table containing dozens of model-specific coefficients. Prefer:
+
+- design and sample-size summary;
+- model comparison diagnostics;
+- biologically interpretable traits with uncertainty;
+- Bayesian diagnostic summary;
+- LOO/weight table when relevant.
+
+Model coefficients can be placed in supplementary material when they are not the main scientific estimands.
+
+# 55. A complete decision algorithm
+
+Use the following sequence.
+
+## Step 1: validate design
+
+Run `growth_validate()` and inspect `growth_plan()`.
+
+## Step 2: visualize observations
+
+Use `growth_plot()` and preserve experimental units.
+
+## Step 3: choose representation
+
+Decide whether the question is classical growth indices, a parametric curve, a flexible smoother, a mixed trajectory, FPCA, or a combination.
+
+## Step 4: fit and diagnose
+
+Do not move directly from convergence to biological interpretation.
+
+## Step 5: define estimands
+
+Write down the traits or contrasts that answer the agronomic question.
+
+## Step 6: propagate uncertainty
+
+Use design-aware bootstrap or a justified Bayesian posterior.
+
+## Step 7: assess model-form sensitivity
+
+Use bootstrap selection stability, alternative functional forms, flexible smoothers, or LOO-based comparison.
+
+## Step 8: report predictions separately from expected curves
+
+Do not label a mean-response interval as a future-observation prediction interval.
+
+# 56. Example scientific question: drought timing
+
+Suppose the scientific question is whether water deficit delays or accelerates the time at which bean plants pass through their most rapid height-growth phase.
+
+A defensible strategy is:
+
+1. declare repeated plants and water regime;
+2. visualize each plant trajectory;
+3. fit a mixed or hierarchical nonlinear model;
+4. estimate treatment-specific inflection time or maximum-rate time;
+5. propagate treatment and unit uncertainty;
+6. inspect model adequacy;
+7. report treatment differences on the time scale with intervals.
+
+This is preferable to testing separate treatment means at every day.
+
+# 57. Example scientific question: cultivar maturity
+
+For sunflower cultivars, the target could be `t90`, interpreted as the fitted time to 90% of the model's asymptotic biomass.
+
+Key cautions:
+
+- the experiment should extend sufficiently far into the late growth phase;
+- `t90` is model-based and can be extrapolative;
+- compare `t90` across plausible model families;
+- use bootstrap or posterior draws for uncertainty;
+- distinguish earlier fitted maturity from actual physiological maturity if the latter was not measured.
+
+# 58. Example scientific question: maximum crop growth rate
+
+If a fertilizer treatment is expected to alter peak biomass accumulation, estimate `maximum_absolute_rate` with uncertainty rather than relying only on final biomass.
+
+The maximum rate may shift in both magnitude and timing, so report both when scientifically relevant.
+
+# 59. Example scientific question: model-form uncertainty
+
+If Logistic and Gompertz fit similarly:
+
+- do not choose based only on the third decimal of AICc;
+- examine bootstrap selection stability;
+- compare biological trait estimates;
+- in Bayesian analysis, inspect PSIS-LOO and Pareto-k;
+- use stacking if a predictive mixture serves the research goal.
+
+# 60. Sensitivity analysis
+
+A strong uncertainty workflow can include planned sensitivity analyses for:
+
+- bootstrap method;
+- nonlinear starting-value strategy;
+- candidate model set;
+- prior scale;
+- random-effect template;
+- inclusion of weakly supported extrapolation;
+- treatment effect on selected nonlinear parameters.
+
+Sensitivity analysis should be defined around scientifically plausible alternatives, not an exhaustive search for favorable results.
+
+# 61. Known-truth numerical checks
+
+Before trusting a new analysis pipeline, simulation can verify whether known parameter and trait values are recovered under controlled conditions.
+
+For example:
+
+1. generate Logistic data with known \(A,m,s\);
+2. add Gaussian error;
+3. fit the Logistic model;
+4. verify approximate recovery of \(m=t_{50}\);
+5. run bootstrap intervals across many simulated experiments;
+6. evaluate empirical coverage;
+7. fit the Bayesian model and inspect posterior calibration in a separate simulation study.
+
+The package test suite includes deterministic formula checks, but full simulation-based calibration remains a user-level or development-level task because it is computationally intensive.
+
+# 62. Why this version remains modular
+
+`agriGrowthFlow` does not import `brms`, `loo`, or `posterior` as mandatory dependencies. They are optional backends.
+
+Advantages:
+
+- the Foundations layer remains lightweight;
+- users who need only classical growth analysis do not install Stan;
+- Bayesian dependency failures are explicit;
+- package architecture remains testable in layers.
+
+# 63. Python is not required
+
+Version 0.4.0 remains R-first. Python, PyMC, or other engines are not mandatory. Cross-language validation can be added in development workflows without making it a user dependency.
+
+# 64. Version-specific limitations to report honestly
+
+Version 0.4.0 does not yet provide:
+
+- Bayesian implementations for all eight parametric families;
+- Bayesian residual AR/CAR templates in the convenience API;
+- posterior treatment-contrast helper functions;
+- bootstrap uncertainty for smoothers or FPCA;
+- BCa intervals in `growth_boot_ci()`;
+- exact leave-one-cluster-out cross-validation for hierarchical data;
+- automated simulation-based calibration.
+
+These are future-development opportunities, not hidden capabilities.
+
+# 65. Reproducibility and audit trail
+
+A final uncertainty report should preserve:
+
+- source data checksum;
+- analysis script checksum;
+- package version;
+- random seeds;
+- number of bootstrap and posterior draws;
+- convergence/failure logs;
+- model formulas;
+- priors;
+- package dependency versions.
+
+For Bayesian models, save the full fit object to preserve posterior draws used for tables and figures.
+
+# 66. Final reporting hierarchy
+
+A clear scientific Results section can follow this hierarchy:
+
+1. observed growth pattern;
+2. selected or weighted model representation;
+3. diagnostic adequacy;
+4. biologically interpretable trait estimates;
+5. uncertainty intervals;
+6. treatment or genotype contrasts;
+7. sensitivity to model family or assumptions;
+8. prediction only if it is a study objective.
+
+# 67. Integrated package workflow
+
+The complete package logic through 0.4.0 is:
+
+```text
+raw observations
+      ↓
+growth_data()
+      ↓
+growth_validate() + growth_plan()
+      ↓
+visualization
+      ↓
+classical indices / parametric / mixed / smooth / FPCA / MANOVA
+      ↓
+model diagnostics
+      ↓
+biological traits
+      ↓
+bootstrap or Bayesian uncertainty
+      ↓
+model-form sensitivity / PSIS-LOO / stacking
+      ↓
+scientific interpretation and reproducible report
+```
+
+# 68. Final principles
+
+The most important principles of 0.4.0 are:
+
+1. uncertainty begins with design;
+2. resampling units follow experimental units;
+3. nonlinear refit failures are data, not clutter;
+4. biological traits are preferred over opaque parameter tables;
+5. priors are inspected before posterior inference;
+6. MCMC diagnostics precede interpretation;
+7. posterior predictive checks precede predictive claims;
+8. Pareto-k diagnostics accompany PSIS-LOO;
+9. stacking weights are predictive weights, not truth probabilities;
+10. model-form uncertainty should be reported when it changes the agronomic conclusion.
+
+# 69. Where to go next
+
+The 0.5.0 roadmap can extend uncertainty into biologically complex events and decisions, including multiphasic growth, defoliation, disturbance, stability points, competition, and optimal harvest decisions. Those modules can reuse the uncertainty objects created here rather than reinventing inference for each new biological problem.
+
+# References

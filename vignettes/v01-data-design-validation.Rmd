@@ -1,0 +1,163 @@
+---
+title: "Data Structure, Experimental Units, and Validation"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Data Structure, Experimental Units, and Validation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(agriGrowthFlow)
+```
+
+# 1. Why design validation belongs inside a growth package
+
+A growth trajectory is not only a sequence of values. It is a sequence attached to a biological and experimental unit. Keuls and Garretsen explicitly distinguished non-destructive repeated measurements from destructive harvests of different plant groups within a plot [@KeulsGarretsen1982]. `agriGrowthFlow` turns that distinction into software behavior.
+
+# 2. Role declaration rather than column-name guessing
+
+```{r}
+d <- growth_example_data("maize_destructive")
+
+g <- growth_data(
+  d,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  plot = "plot_id",
+  block = "block",
+  treatment = "nitrogen",
+  total_mass = "total_mass_g",
+  leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g",
+  root_mass = "root_mass_g",
+  stem_mass = "stem_mass_g",
+  reproductive_mass = "reproductive_mass_g",
+  ground_area = "ground_area_m2"
+)
+```
+
+The role map permits arbitrary user column names without making biological assumptions from labels such as `id`, `rep`, `mass`, or `area`.
+
+# 3. Explicit design declaration
+
+```{r}
+des <- growth_design(g, design = "rcbd")
+des
+
+growth_validate(des)
+```
+
+A design object does not reconstruct randomization that is absent from the data. It records the analyst's declared structure and checks for detectable contradictions.
+
+# 4. Destructive harvests
+
+For a serial destructive experiment, different plants or quadrats are removed at each date. The stable trajectory belongs to a plot or another higher-level experimental unit, not to the harvested material itself.
+
+The maize teaching data contain two harvest quadrats per plot and day:
+
+```{r}
+with(d, table(plot_id, day))[1:4, ]
+```
+
+The correct foundational operation is to summarize within plot and day, then form intervals within plot.
+
+```{r}
+idx <- growth_indices(g)
+head(idx$aggregated)
+```
+
+## Common error: artificial pairing
+
+Suppose quadrat 1 at day 14 is paired with quadrat 1 at day 28 merely because both are labelled `Q1`. Unless the same physical unit persisted and the design supports this correspondence, the pairing is artificial. It can understate uncertainty and create a false longitudinal structure.
+
+# 5. Repeated non-destructive observation
+
+```{r}
+r <- growth_example_data("bean_repeated")
+
+gr <- growth_data(
+  r,
+  time = "day",
+  sampling = "repeated",
+  plant = "plant_id",
+  experimental_unit = "plant_id",
+  block = "block",
+  treatment = "water_regime",
+  leaf_area = "projected_leaf_area_m2"
+)
+
+growth_validate(gr)
+```
+
+Here each plant has multiple observations. That dependence should later be represented by a repeated or mixed model rather than ignored.
+
+# 6. Validation codes
+
+The validation object contains a machine-readable table.
+
+```{r}
+v <- growth_validate(gr)
+v$issues
+```
+
+Typical issue classes include:
+
+- `missing_time_role`;
+- `time_not_numeric_or_date`;
+- `too_few_times`;
+- `limited_time_support`;
+- `repeated_without_subject`;
+- `duplicate_subject_time`;
+- `destructive_without_stable_unit`;
+- `treatment_changes_within_unit`;
+- `block_changes_within_unit`;
+- `design_sampling_conflict`.
+
+# 7. Four harvest dates are a design target, not a universal theorem
+
+Keuls and Garretsen advised at least four harvest dates for each growth phase in the context of characterizing growth curves [@KeulsGarretsen1982]. `growth_validate()` therefore treats fewer than four times as limited support rather than as an automatic fatal error. Two points define one interval, but they do not reveal curve shape.
+
+# 8. Units and support
+
+Hunt's classical quantities are dimensional. A formula can be numerically correct and scientifically uninterpretable if the numerator and denominator refer to incompatible bases [@Hunt1990].
+
+Examples:
+
+- g plant$^{-1}$ day$^{-1}$ is not directly interchangeable with g m$^{-2}$ day$^{-1}$;
+- leaf area per plant divided by ground area per plot is invalid unless the plant-to-ground-area relationship has been defined;
+- total fresh mass should not be combined with dry leaf mass in partitioning without an explicit conversion basis.
+
+Record units in the data object:
+
+```{r}
+g$units
+```
+
+# 9. Missing observations
+
+Version 0.1.0 does not impute missing growth observations. A missing harvest can create a longer interval. That may be scientifically acceptable, but the interval must be visible.
+
+```{r}
+head(idx$intervals[c("plot_id", "t1", "t2", "dt")])
+```
+
+Later versions will add model-based missing-data strategies where appropriate. The foundational package never fabricates an intermediate harvest silently.
+
+# 10. Validation is not hypothesis testing
+
+`growth_validate()` should not be interpreted as a statistical test of whether the design was correctly conducted. Randomization, contamination, edge effects, sampling interference and protocol deviations may require field records that are absent from the analysis table.
+
+# 11. Recommended audit text for a manuscript
+
+A methods section should make clear whether each date represents repeated observation of the same plants or destructive sampling of different material, and it should identify the stable experimental unit from which a growth trajectory was constructed. When multiple subsamples are collected from an experimental unit at one harvest, state how they were combined before interval rates were calculated.
+
+# References

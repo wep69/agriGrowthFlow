@@ -1,0 +1,385 @@
+---
+title: "agriGrowthFlow 0.3.0: Multivariate Growth Components and MANOVA"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 0.3.0: Multivariate Growth Components and MANOVA}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+
+# 1. Historical motivation
+
+Keuls and Garretsen treated each experimental-unit growth curve as a multivariate object and decomposed time trajectories into orthogonal polynomial components before multivariate comparison [@KeulsGarretsen1982]. Their central insight remains useful: a growth curve contains correlated information about overall level, slope-like change, and curvature, so separate univariate tests do not capture the full joint structure.
+
+Version 0.3.0 implements a modern design-aware coefficient decomposition and MANOVA layer.
+
+# 2. The coefficient representation
+
+Suppose all persistent units are observed at the same $m$ time points. A degree-two orthogonal polynomial representation is
+
+$$
+y_i(t_j) = c_{i0} + c_{i1}P_1(t_j) + c_{i2}P_2(t_j) + e_{ij}.
+$$
+
+Each unit is reduced to
+
+$$
+\mathbf c_i=(c_{i0},c_{i1},c_{i2})^{\mathsf T}.
+$$
+
+The MANOVA compares the vector of components among groups.
+
+# 3. Why orthogonal components
+
+Orthogonality reduces algebraic correlation caused purely by the basis. It does not guarantee that biological component estimates are statistically independent across experimental units.
+
+# 4. Teaching maize data
+
+```{r}
+maize <- growth_example_data("maize_destructive")
+head(maize)
+```
+
+There are persistent plots, nitrogen treatments, blocks, multiple harvests, and destructive subsamples.
+
+# 5. Plot-level reduction first
+
+The destructive subsamples are not independent growth curves. `growth_curve_coefficients()` aggregates them at persistent plot by time before fitting polynomial components.
+
+```{r}
+cf <- growth_curve_coefficients(
+  maize,
+  time = "day",
+  response = "total_mass_g",
+  unit = "plot_id",
+  group = "nitrogen",
+  degree = 2
+)
+head(cf)
+```
+
+# 6. Output columns
+
+For degree two, the coefficient table contains:
+
+- `level`: the constant component;
+- `P1`: first orthogonal polynomial component;
+- `P2`: second orthogonal polynomial component.
+
+These names are deliberately basis-oriented rather than falsely biological.
+
+# 7. Common time grid requirement
+
+Every persistent unit must have the same observed time grid. The function refuses missing harvest schedules rather than silently interpolating them.
+
+This safeguard preserves the classical coefficient-comparison logic.
+
+# 8. Why silent interpolation is dangerous
+
+If one treatment has more missing late harvests, reconstructing those values before MANOVA can create treatment-dependent information that was not observed. A mixed model or functional sparse-data method may be more appropriate.
+
+# 9. Response transformation
+
+For approximately exponential biomass growth, log transformation can linearize early trajectories:
+
+```{r}
+cf_log <- growth_curve_coefficients(
+  maize,
+  time="day",
+  response="total_mass_g",
+  unit="plot_id",
+  group="nitrogen",
+  degree=2,
+  transform="log"
+)
+```
+
+The package rejects zero or negative responses for this transformation.
+
+# 10. Transformation changes interpretation
+
+Polynomial components of log biomass describe multiplicative growth structure, not raw biomass differences.
+
+# 11. Fit MANOVA
+
+```{r}
+mv <- growth_manova(
+  maize,
+  time="day",
+  response="total_mass_g",
+  unit="plot_id",
+  group="nitrogen",
+  degree=2,
+  test="Pillai"
+)
+mv
+```
+
+# 12. Multivariate null hypothesis
+
+The null is that group mean component vectors are equal:
+
+$$
+H_0:\quad \boldsymbol\mu_1=\boldsymbol\mu_2=\cdots=\boldsymbol\mu_g.
+$$
+
+Rejecting it indicates a difference in some linear combination of curve components.
+
+# 13. Pillai trace
+
+Pillai's trace is the default. It is often regarded as comparatively robust among common MANOVA statistics, but no statistic rescues severe design or covariance violations.
+
+# 14. Wilks lambda
+
+```{r}
+mv_w <- growth_manova(
+  maize,
+  time="day",
+  response="total_mass_g",
+  unit="plot_id",
+  group="nitrogen",
+  degree=2,
+  test="Wilks"
+)
+```
+
+# 15. Hotelling-Lawley and Roy
+
+Both are exposed for sensitivity or conventional reporting:
+
+```{r eval=FALSE}
+growth_manova(maize, time="day", response="total_mass_g",
+              unit="plot_id", group="nitrogen", test="Hotelling-Lawley")
+growth_manova(maize, time="day", response="total_mass_g",
+              unit="plot_id", group="nitrogen", test="Roy")
+```
+
+Do not scan the four statistics and report only the one that crosses a desired threshold.
+
+# 16. Component-wise ANOVAs
+
+```{r eval=FALSE}
+mv$component_anova
+```
+
+These help identify which components contribute to the multivariate difference. They are secondary to the joint test and should be interpreted with multiplicity and correlation in mind.
+
+# 17. Overall level
+
+A strong `level` difference means one treatment tends to have higher values across the analyzed period. It does not specify when separation emerged.
+
+# 18. First component
+
+The first orthogonal component often captures a monotone contrast across time. Its exact scale depends on the observed time grid and orthogonal basis.
+
+# 19. Curvature component
+
+The second component summarizes bend or curvature. It should not automatically be called an inflection parameter.
+
+# 20. Higher degrees
+
+```{r eval=FALSE}
+cf3 <- growth_curve_coefficients(maize, time="day", response="total_mass_g",
+                                 unit="plot_id", group="nitrogen", degree=3)
+```
+
+Higher degree adds components but also consumes multivariate degrees of freedom and can reduce interpretability.
+
+# 21. Number of harvests
+
+At least degree plus one distinct times are mathematically required. Scientifically, more times are usually needed to estimate curve shape with useful precision. Keuls and Garretsen recommended several harvests per developmental phase [@KeulsGarretsen1982].
+
+# 22. Number of experimental units
+
+MANOVA dimension should remain small relative to the number of independent units. A model with many components and few plots can be unstable or singular.
+
+# 23. Blocking
+
+The compact `growth_manova()` API currently compares group coefficients without adding block to the MANOVA formula. If block adjustment is essential, use the returned coefficient table and fit a design-specific multivariate model directly.
+
+```{r eval=FALSE}
+cf <- growth_curve_coefficients(...)
+fit <- manova(cbind(level,P1,P2) ~ nitrogen + block, data=merge(cf, block_lookup))
+```
+
+Do not pretend the wrapper covers a design term it does not fit.
+
+# 24. Repeated plants example
+
+```{r}
+bean <- growth_example_data("bean_repeated")
+cf_b <- growth_curve_coefficients(
+  bean,
+  time="day",
+  response="height_cm",
+  unit="plant_id",
+  group="water_regime",
+  degree=2
+)
+head(cf_b)
+```
+
+# 25. MANOVA on repeated-plant coefficients
+
+```{r}
+mv_b <- growth_manova(
+  bean,
+  time="day",
+  response="height_cm",
+  unit="plant_id",
+  group="water_regime",
+  degree=2
+)
+```
+
+This treats each plant's coefficient vector as the multivariate outcome. It is different from a mixed model fitted to all repeated observations.
+
+# 26. Why coefficient MANOVA and mixed models differ
+
+The coefficient approach is a two-stage reduction. Mixed models estimate population and covariance structure jointly. The coefficient method is intuitive and useful for balanced common-grid designs but can lose information or handle missing data poorly.
+
+# 27. Why MANOVA and FPCA differ
+
+Orthogonal polynomial components are fixed basis functions determined by time. FPCA eigenfunctions are data-adaptive directions that maximize functional variance.
+
+# 28. Why MANOVA and nonlinear curves differ
+
+Nonlinear curves produce parameters with direct biological interpretations under the chosen equation. Polynomial MANOVA produces descriptive curve components.
+
+# 29. Covariance assumptions
+
+Classical MANOVA relies on assumptions about multivariate residual distributions and covariance matrices. With small agricultural experiments, these assumptions should be inspected rather than assumed from software output.
+
+# 30. Outliers
+
+A single unusual experimental unit can influence the covariance matrix and multivariate test strongly. Inspect coefficient scatterplots and raw trajectories before considering any exclusion.
+
+# 31. Coefficient scatterplot
+
+```{r eval=FALSE}
+plot(cf$P1, cf$P2, pch=as.integer(factor(cf$group)),
+     xlab="P1", ylab="P2")
+legend("topright", legend=unique(cf$group), pch=seq_along(unique(cf$group)))
+```
+
+# 32. Level versus curvature plot
+
+```{r eval=FALSE}
+plot(cf$level, cf$P2, pch=as.integer(factor(cf$group)))
+```
+
+Such plots reveal whether group separation is multivariate or driven mainly by one component.
+
+# 33. Standardization
+
+Do not standardize polynomial coefficients automatically before MANOVA. Their scales arise from the orthogonal basis. If a standardized analysis is scientifically needed, define it explicitly.
+
+# 34. Unequal spacing
+
+Orthogonal polynomials are computed on the actual common time values. Unequal time spacing therefore influences the basis appropriately.
+
+# 35. Time rescaling
+
+Changing days to weeks changes the numerical basis but not the underlying span geometry in a simple way. Keep units documented.
+
+# 36. Common error: separate ANOVA at every harvest
+
+Testing each date separately ignores the curve as a correlated multivariate object and creates multiplicity. It can still be appropriate for prespecified time-specific questions, but it is not equivalent to growth-curve analysis.
+
+# 37. Common error: treating harvest subsamples as replicates
+
+For destructive plot series, independent treatment replication remains the plot, not each harvested plant.
+
+# 38. Common error: using very high degree
+
+A high-order polynomial can interpolate noise and generate unstable components.
+
+# 39. Common error: interpreting P2 as physiological acceleration
+
+P2 is an orthogonal polynomial coefficient. Use the flexible derivative module for acceleration on the response scale.
+
+# 40. Common error: filling missing harvests silently
+
+The package stops instead.
+
+# 41. Common error: interpreting multivariate significance as every component differing
+
+A significant MANOVA concerns the vector, not every individual component.
+
+# 42. Common error: choosing test statistic after results
+
+Preselect or report sensitivity transparently.
+
+# 43. Methods template
+
+> Growth trajectories were reduced at the persistent plot level to orthogonal polynomial components on the common observed harvest grid. A second-degree basis represented overall level, linear trajectory contrast, and curvature. Treatment groups were compared jointly by MANOVA using Pillai's trace. Component-wise ANOVAs were examined only as secondary descriptions of the multivariate result. Destructive subsamples were averaged within plot and harvest before coefficient estimation.
+
+# 44. Results template
+
+> The joint vector of growth components differed among nitrogen treatments. Separation was dominated by the overall level and first trajectory component, whereas the curvature component showed weaker group differentiation. These findings were consistent with the observed plot-level trajectories and were not interpreted as direct physiological rate parameters.
+
+# 45. Compact script
+
+```{r eval=FALSE}
+d <- growth_example_data("maize_destructive")
+
+cf <- growth_curve_coefficients(
+  d,
+  time="day",
+  response="total_mass_g",
+  unit="plot_id",
+  group="nitrogen",
+  degree=2
+)
+
+mv <- growth_manova(
+  d,
+  time="day",
+  response="total_mass_g",
+  unit="plot_id",
+  group="nitrogen",
+  degree=2,
+  test="Pillai"
+)
+
+mv
+mv$component_anova
+```
+
+# 46. Decision guide
+
+Prefer component MANOVA when:
+
+- all persistent units share a common observed time grid;
+- the number of harvests is modest;
+- a low-degree polynomial basis describes the trajectory adequately;
+- joint comparison of curve components is the scientific target.
+
+Prefer mixed effects when:
+
+- repeated data are unbalanced;
+- covariance structure is central;
+- time-by-treatment inference is needed with missing observations.
+
+Prefer FPCA when:
+
+- trajectories are dense or irregular;
+- data-adaptive modes of functional variation are the target.
+
+# 47. Final perspective
+
+The 0.3.0 MANOVA layer preserves an important classical idea while adding modern safeguards. It treats the curve as a vector of correlated features at the correct experimental-unit level. Its value is greatest in balanced designs, and its limitations are made explicit rather than hidden by automatic interpolation.
+
+# References

@@ -1,0 +1,565 @@
+---
+title: "Disturbance, Defoliation, and Compensatory Plant Growth"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Disturbance, Defoliation, and Compensatory Plant Growth}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.5)
+```
+
+# Purpose
+
+Plant growth data may contain deliberate or accidental losses of biomass. Defoliation, herbivory, pruning, hail, lodging, harvest of leaves, and mechanical damage can create abrupt discontinuities that a smooth uninterrupted trajectory cannot represent faithfully. Anten and Ackerly developed an iterative plant-growth analysis for this setting and emphasized that losses must be measured rather than inferred from a polynomial [@AntenAckerly2001].
+
+Version 0.5.0 adds three complementary tools:
+
+- `growth_event()` to declare a known event without pretending it was estimated;
+- `growth_defoliation()` to estimate an iterative constant-parameter growth reconstruction from measured total mass, leaf mass, leaf area, and losses;
+- `growth_compensation()` to summarize the degree of recovery relative to a control.
+
+# The biological state variables
+
+Let $W$ denote total plant mass, $L$ leaf lamina mass, and $A$ leaf area. Then
+
+$$
+SLA=\frac{A}{L}, \qquad LAR=\frac{A}{W}.
+$$
+
+With net assimilation rate $NAR$, relative growth rate is represented as
+
+$$
+RGR=LAR\times NAR,
+$$
+
+and daily or small-step gross growth is
+
+$$
+G=W\times RGR.
+$$
+
+The iterative update used in the package follows the structure described by Anten and Ackerly [@AntenAckerly2001]: new assimilate is partitioned to leaf lamina with fraction $f_{lam}$, leaf area production depends on a new-leaf SLA multiplier $\gamma$, and known losses are subtracted at their recorded event times.
+
+# Teaching data
+
+```{r}
+library(agriGrowthFlow)
+bean <- growth_example_data("bean_defoliation")
+head(bean)
+with(bean, table(treatment, day))
+```
+
+The data are simulated. The `defoliated` treatment has measured losses at two event times. The `control` treatment has zero loss columns.
+
+# Declare an event
+
+```{r}
+ev <- growth_event(
+  bean,
+  time = "day",
+  response = "total_mass_g",
+  event_time = 21,
+  unit = "plant_id",
+  event_type = "defoliation"
+)
+ev
+head(ev$data)
+```
+
+`growth_event()` does not estimate the event time. This is deliberate. If defoliation occurred on day 21 by protocol, the analysis should record day 21 as known rather than repeatedly search the data for a statistically convenient break.
+
+# Iterative reconstruction for one plant
+
+```{r, eval=FALSE}
+one <- subset(bean, plant_id == unique(bean$plant_id[bean$treatment == "defoliated"])[1])
+fit <- growth_defoliation(
+  one,
+  time = "day",
+  total_mass = "total_mass_g",
+  leaf_mass = "leaf_mass_g",
+  leaf_area = "leaf_area_m2",
+  total_loss = "total_loss_g",
+  leaf_mass_loss = "leaf_mass_loss_g",
+  leaf_area_loss = "leaf_area_loss_m2",
+  step = 0.25
+)
+fit
+fit$fits[[1]]$observed
+fit$fits[[1]]$simulated
+```
+
+The estimated parameters are constant over the analyzed window. That assumption is convenient and interpretable, but it must be checked against the biology. A long experiment with changing ontogeny, light environment, or leaf age may need a richer model.
+
+# Multiple persistent units
+
+```{r, eval=FALSE}
+def <- growth_defoliation(
+  subset(bean, treatment == "defoliated"),
+  time = "day",
+  total_mass = "total_mass_g",
+  leaf_mass = "leaf_mass_g",
+  leaf_area = "leaf_area_m2",
+  total_loss = "total_loss_g",
+  leaf_mass_loss = "leaf_mass_loss_g",
+  leaf_area_loss = "leaf_area_loss_m2",
+  unit = "plant_id"
+)
+def$parameters
+```
+
+Estimating each plant separately is useful for exploratory distributions of NAR, allocation, and SLA response. Population inference on those quantities should respect the experimental design and may require mixed or hierarchical models.
+
+# Why measured losses matter
+
+A smooth curve cannot identify how much tissue was removed if the plant continues to grow between measurement times. The same observed final mass can arise from different combinations of gross assimilation and tissue loss. The loss columns therefore represent external information that identifies the disturbance process.
+
+When loss values are unavailable, the correct response is not to invent them. The user can still analyze observed post-event trajectories with `growth_event()`, mixed models, smoothers, or changepoints, but the iterative defoliation decomposition should not be interpreted as identified.
+
+# Compensatory growth
+
+Compensation is relative to a comparison condition and depends on the metric.
+
+```{r}
+growth_compensation(
+  bean,
+  group = "treatment",
+  control = "control",
+  response = "total_mass_g",
+  time = "day",
+  unit = "plant_id",
+  metric = "final"
+)
+```
+
+Area under the trajectory addresses cumulative performance:
+
+```{r}
+growth_compensation(
+  bean,
+  group = "treatment",
+  control = "control",
+  response = "total_mass_g",
+  time = "day",
+  unit = "plant_id",
+  metric = "auc"
+)
+```
+
+Slope provides a simpler rate-oriented summary:
+
+```{r}
+growth_compensation(
+  bean,
+  group = "treatment",
+  control = "control",
+  response = "leaf_area_m2",
+  time = "day",
+  unit = "plant_id",
+  metric = "slope"
+)
+```
+
+A compensation ratio near 1 has different meaning for final biomass, cumulative biomass exposure, and post-event rate. The metric must be chosen before biological interpretation.
+
+# Disturbance-aware plotting
+
+A useful plot should show the event time explicitly, display individual units when possible, and distinguish observed discontinuity from modeled growth between events.
+
+```{r, eval=FALSE}
+library(ggplot2)
+ggplot(bean, aes(day, total_mass_g, group=plant_id, colour=treatment)) +
+  geom_line(alpha=.35) + geom_point() +
+  geom_vline(xintercept=c(21,35), linetype=2) +
+  theme_bw()
+```
+
+# Statistical hierarchy
+
+If multiple plants are nested in pots, benches, blocks, or plots, the event analysis should not erase that hierarchy. The version 0.5.0 iterative estimator is a unit-level mechanistic summary. It can feed a subsequent treatment-level analysis of estimated NAR or allocation parameters, but uncertainty from the first stage should be acknowledged.
+
+# Common errors
+
+1. Using a polynomial through a discontinuity and interpreting its derivative as instantaneous physiology.
+2. Treating removed mass as missing data rather than a biological event.
+3. Estimating loss amount from the same smooth curve used to estimate growth.
+4. Comparing treatment means without preserving persistent units.
+5. Declaring overcompensation from a single final time when cumulative performance tells a different story.
+6. Assuming NAR and allocation are constant over a long developmental period without checking.
+7. Using different units for leaf area and mass without recording them.
+
+# Reporting example
+
+A concise Methods statement should identify event timing, how removed biomass and area were measured, the persistent experimental unit, the numerical integration step, and whether NAR, allocation fraction, and the SLA multiplier were held constant. Results should distinguish observed recovery from model-derived physiology.
+
+# Exercises
+
+## Exercise 1
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 2
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 3
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 4
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 5
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 6
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 7
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 8
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 9
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 10
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 11
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 12
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 13
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 14
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 15
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 16
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 17
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 18
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 19
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 20
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 21
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 22
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 23
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 24
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 25
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 26
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 27
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 28
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 29
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 30
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 31
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 32
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+## Exercise 33
+
+Select one defoliated and one control plant. Plot total mass, leaf mass, and leaf area over time. Identify every row with non-zero measured loss. Fit the iterative model to the defoliated plant, inspect observed versus reconstructed states, and state which assumption would be most questionable if the experiment were extended for another 60 days.
+
+```{r, eval=FALSE}
+unit_id <- unique(bean$plant_id[bean$treatment == "defoliated"])[1]
+z <- subset(bean, plant_id == unit_id)
+fit_ex <- growth_defoliation(z, time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", step=0.25)
+fit_ex$parameters
+```
+
+# References
+
+The disturbance model is grounded in @AntenAckerly2001 and the classical growth quantities summarized by @Hunt1990.

@@ -1,0 +1,134 @@
+---
+title: "Classical Plant Growth Analysis: AGR, RGR, and NAR"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Classical Plant Growth Analysis: AGR, RGR, and NAR}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(agriGrowthFlow)
+```
+
+# 1. Classical growth analysis as a set of biological rates
+
+Classical plant growth analysis converts measurements at discrete harvests into rates and ratios. Hunt's treatment remains a useful foundation because it separates absolute change, proportional change, leaf-area efficiency and allocation [@Hunt1990].
+
+# 2. Absolute growth rate
+
+For dry mass $W$,
+
+$$
+AGR = \frac{W_2-W_1}{t_2-t_1}.
+$$
+
+```{r}
+growth_agr(10, 18, 0, 4)
+```
+
+If mass is g plant$^{-1}$ and time is days, AGR is g plant$^{-1}$ day$^{-1}$. AGR can be negative when net dry mass decreases.
+
+# 3. Relative growth rate
+
+$$
+RGR = \frac{\ln W_2-\ln W_1}{t_2-t_1}.
+$$
+
+```{r}
+growth_rgr(10, 18, 0, 4)
+```
+
+RGR requires positive masses because of the logarithm. The result has dimensions of reciprocal time when the same mass unit is used at both harvests.
+
+RGR answers a different question from AGR. A young plant can have a high RGR while adding little absolute mass, whereas a large mature plant can add more grams per day with a lower proportional rate.
+
+# 4. Net assimilation rate
+
+For total dry mass $W$ and leaf area $A$,
+
+$$
+NAR =
+\frac{W_2-W_1}{t_2-t_1}
+\frac{\ln A_2-\ln A_1}{A_2-A_1}.
+$$
+
+```{r}
+growth_nar(
+  w1 = 10, w2 = 18,
+  a1 = 0.08, a2 = 0.14,
+  t1 = 0, t2 = 4
+)
+```
+
+When leaf areas are equal, the analytical expression has a removable singularity. The implementation uses the limit:
+
+$$
+NAR = AGR/A.
+$$
+
+```{r}
+growth_nar(10, 18, 0.10, 0.10, 0, 4)
+```
+
+# 5. Why NAR is not simply photosynthesis
+
+NAR is a whole-plant dry-mass accumulation rate per unit leaf area over an interval. It integrates photosynthesis, respiration, translocation, tissue turnover and the changing light environment. It should not be labelled as a direct gas-exchange measurement.
+
+# 6. Use stable experimental units
+
+```{r}
+d <- growth_example_data("maize_destructive")
+g <- growth_data(
+  d, time = "day", sampling = "destructive",
+  experimental_unit = "plot_id", treatment = "nitrogen", block = "block",
+  total_mass = "total_mass_g", leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g", ground_area = "ground_area_m2"
+)
+
+idx <- growth_indices(g)
+head(idx$intervals[c("plot_id", "nitrogen", "block", "t1", "t2", "AGR", "RGR", "NAR")])
+```
+
+The formulas are applied after quadrats within each plot-date are summarized. This prevents arbitrary quadrat-to-quadrat pairing.
+
+# 7. Ontogenetic drift
+
+RGR commonly changes with plant age. A single RGR over an entire season can hide important biological transitions. The classical interval table keeps every interval explicit.
+
+```{r}
+aggregate(RGR ~ nitrogen + t1 + t2, idx$intervals, mean)
+```
+
+# 8. Classical versus functional approaches
+
+The functional approach fits a smooth function to size or log size and differentiates it. Shipley and Hunt later discussed spline and LOESS smoothers that estimate trends and derivatives without imposing a single global parametric growth function [@ShipleyHunt1996]. Those smooth methods are planned for a later `agriGrowthFlow` release.
+
+Poorter proposed a synthesis that smooths classical RGR values to reduce harvest-to-harvest fluctuation while retaining their interval basis [@Poorter1989]. Version 0.1.0 deliberately reports the unsmoothed foundational quantities so the raw information remains visible.
+
+# 9. Edge cases and interpretation
+
+## Zero or negative mass
+
+RGR is undefined for non-positive mass. Do not add arbitrary constants merely to make the logarithm work without a scientific reason.
+
+## Declining leaf area
+
+The classical NAR expression remains mathematically usable for positive decreasing leaf area because both $\ln A_2-\ln A_1$ and $A_2-A_1$ are negative. Interpretation becomes increasingly dependent on the assumption that interval averages summarize a changing canopy adequately.
+
+## Defoliation and abrupt biomass loss
+
+Classical smooth-interval assumptions become problematic when known losses occur between harvests. Anten and Ackerly developed an iterative approach specifically for plants experiencing periodic biomass and leaf-area losses [@AntenAckerly2001]. That method is outside 0.1.0 and is planned for a later disturbance module.
+
+# 10. Reporting
+
+Report the two harvest dates, the mass and leaf-area basis, the experimental unit, whether the values were raw observations or within-unit summaries, and the exact units. Avoid reporting RGR or NAR without stating the interval over which it was calculated.
+
+# References

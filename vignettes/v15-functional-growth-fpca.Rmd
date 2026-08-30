@@ -1,0 +1,423 @@
+---
+title: "agriGrowthFlow 0.3.0: Functional Growth and FPCA"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 0.3.0: Functional Growth and FPCA}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+
+# 1. From repeated measurements to functions
+
+When each plant is measured many times, the trajectory itself can become the observational object. Functional data analysis treats repeated values as observations of an underlying function rather than as unrelated columns [@RamsaySilverman2005; @WangChiouMuller2016].
+
+For plant $i$, write the trajectory as
+
+$$
+X_i(t)=\mu(t)+\sum_{k=1}^{\infty}\xi_{ik}\phi_k(t),
+$$
+
+where $\mu(t)$ is the mean function, $\phi_k(t)$ are functional principal components, and $\xi_{ik}$ are plant-specific scores.
+
+# 2. Why FPCA is useful for plant growth
+
+FPCA can summarize differences such as:
+
+- larger versus smaller plants over most of the season;
+- early versus late development;
+- rapid early expansion followed by slower late growth;
+- treatment-specific timing patterns;
+- irregular trajectory shape that would require many scalar traits to describe.
+
+It is a dimension-reduction method, not a mechanistic growth model.
+
+# 3. Teaching data
+
+```{r}
+bean <- growth_example_data("bean_repeated")
+irr <- growth_example_data("soybean_irregular")
+```
+
+# 4. Persistent unit is mandatory
+
+FPCA cannot be computed meaningfully if the rows do not identify which observations belong to the same trajectory. `growth_fpca()` therefore requires a persistent `unit`.
+
+# 5. The built-in grid engine
+
+The base implementation is dependency-light:
+
+```{r}
+fp_h <- growth_fpca(
+  bean,
+  time = "day",
+  response = "height_cm",
+  unit = "plant_id",
+  group = "water_regime",
+  engine = "grid",
+  npc = 2
+)
+fp_h
+```
+
+# 6. Reconstruction on common support
+
+Different units may start or stop at different times. The grid engine finds the interval observed by every unit:
+
+$$
+[t_L,t_U] = \left[\max_i \min(t_i),\ \min_i \max(t_i)\right].
+$$
+
+It reconstructs each curve only within that shared support. It does not extrapolate units into unobserved periods merely to create a rectangular matrix.
+
+# 7. Why common support matters
+
+Suppose one plant is observed only on days 0 to 20 and another only on days 40 to 60. There is no shared interval. The package rejects grid FPCA rather than constructing artificial overlap.
+
+# 8. Grid reconstruction
+
+The default reconstruction uses a smoothing spline within each persistent unit. Linear interpolation is available:
+
+```{r}
+fp_lin <- growth_fpca(
+  bean,
+  time="day",
+  response="height_cm",
+  unit="plant_id",
+  smooth="linear",
+  npc=2
+)
+```
+
+Interpolation choice is part of the functional representation and can affect FPCA.
+
+# 9. L2 scaling
+
+A discretized functional inner product approximates
+
+$$
+\langle f,g\rangle = \int f(t)g(t)dt.
+$$
+
+On an equally spaced grid, multiplying by $\sqrt{\Delta t}$ before PCA makes Euclidean matrix geometry approximate the functional $L^2$ geometry. The built-in engine applies this scaling.
+
+# 10. Examine variance explained
+
+```{r}
+fp_h$pve_each
+fp_h$pve_cumulative
+```
+
+The cumulative PVE is useful for dimension reduction, but component number should also reflect interpretability and stability.
+
+# 11. Automatic component number
+
+```{r}
+fp_auto <- growth_fpca(
+  bean,
+  time="day",
+  response="height_cm",
+  unit="plant_id",
+  pve=.95
+)
+fp_auto$npc
+```
+
+The smallest number reaching the target PVE is selected.
+
+# 12. Scores
+
+```{r}
+head(fp_h$scores_table)
+```
+
+Scores are unit-level summaries. The declared group is retained for later visualization or downstream analysis.
+
+# 13. Eigenfunctions
+
+```{r}
+matplot(fp_h$grid, fp_h$eigenfunctions, type="l", lty=1,
+        xlab="Day", ylab="Eigenfunction value")
+```
+
+The sign of an eigenfunction is arbitrary. Reversing both $\phi_k(t)$ and all corresponding scores leaves the reconstruction unchanged.
+
+# 14. Interpret FPC1
+
+Plot the mean plus and minus a multiple of the first eigenfunction:
+
+```{r eval=FALSE}
+k <- 1
+amp <- sqrt(fp_h$eigenvalues[k])
+plot(fp_h$grid, fp_h$mean, type="l")
+lines(fp_h$grid, fp_h$mean + amp*fp_h$eigenfunctions[,k], lty=2)
+lines(fp_h$grid, fp_h$mean - amp*fp_h$eigenfunctions[,k], lty=3)
+```
+
+Interpret component shape, not sign alone.
+
+# 15. Size mode
+
+If an eigenfunction has the same sign over most of the season, its scores often represent persistent overall size differences.
+
+# 16. Timing mode
+
+If an eigenfunction changes sign from early to late time, it may represent developmental timing: units with positive scores can be ahead early and behind late, or vice versa depending on sign convention.
+
+# 17. Treatment score plots
+
+```{r eval=FALSE}
+boxplot(FPC1 ~ group, data=fp_h$scores_table,
+        xlab="Water regime", ylab="FPC1 score")
+```
+
+This is exploratory. A formal treatment analysis of FPCA scores should respect block and experimental design.
+
+# 18. Do not treat scores as independent automatically
+
+Scores are one row per persistent unit, which is often the correct replication scale. But blocks, families, genotypes, or environments can still create dependence.
+
+# 19. Irregular soybean trajectories
+
+```{r}
+with(irr, summary(table(plant_id)))
+range(irr$day)
+```
+
+Each plant has between seven and ten irregular measurements in the simulated example.
+
+# 20. Built-in FPCA on irregular data
+
+```{r}
+fp_i <- growth_fpca(
+  irr,
+  time="day",
+  response="height_cm",
+  unit="plant_id",
+  group="water_regime",
+  engine="grid",
+  npc=2
+)
+fp_i
+```
+
+The built-in method reconstructs on common support. It is suitable for teaching and moderate irregularity, not a universal sparse-FPCA estimator.
+
+# 21. Sparse FPCA with PACE
+
+For genuinely sparse irregular curves, the optional `fdapace` backend is more specialized.
+
+```{r eval=FALSE}
+if (requireNamespace("fdapace", quietly=TRUE)) {
+  fp_pace <- growth_fpca(
+    irr,
+    time="day",
+    response="height_cm",
+    unit="plant_id",
+    group="water_regime",
+    engine="fdapace",
+    pve=.95
+  )
+}
+```
+
+The wrapper delegates estimation and stores the original backend fit.
+
+# 22. `refund` backend
+
+```{r eval=FALSE}
+if (requireNamespace("refund", quietly=TRUE)) {
+  fp_ref <- growth_fpca(
+    irr,
+    time="day",
+    response="height_cm",
+    unit="plant_id",
+    group="water_regime",
+    engine="refund",
+    nbasis=10,
+    pve=.95
+  )
+}
+```
+
+`refund::fpca.sc()` supports functional PCA from long-form data and is useful when a broader functional regression ecosystem is desired.
+
+# 23. Backend agreement
+
+Different FPCA engines can differ in smoothing, covariance estimation, sparse-data treatment, and component orientation. Compare reconstructed modes rather than expecting numerically identical scores.
+
+# 24. Functional mean
+
+```{r}
+plot(fp_h$grid, fp_h$mean, type="l",
+     xlab="Day", ylab="Mean height")
+```
+
+The mean function is a population trajectory summary. It is distinct from a nonlinear biological growth curve with an asymptote parameter.
+
+# 25. Reconstruct a plant
+
+For retained components,
+
+$$
+\widehat X_i(t)=\widehat\mu(t)+\sum_{k=1}^{K}\widehat\xi_{ik}\widehat\phi_k(t).
+$$
+
+This provides dimension-reduced reconstruction.
+
+# 26. Why reconstruction can smooth noise
+
+Discarding low-variance components acts as dimension reduction. It can suppress noise, but it can also remove biologically important rare patterns.
+
+# 27. Outlying functional trajectories
+
+Extreme FPCA scores can indicate unusual plants, measurement errors, stress responses, or genuine phenotypes. Inspect the raw trajectory before labeling an outlier.
+
+# 28. Phase variation versus amplitude variation
+
+FPCA on unregistered curves can mix timing differences with amplitude differences. If plants reach the same developmental events at different times, functional registration may be needed. Version 0.3.0 does not yet implement registration.
+
+# 29. Calendar time versus developmental time
+
+A curve aligned by days after sowing answers a different question from one aligned by thermal time or phenological stage. The functional domain must be scientifically defined.
+
+# 30. Missingness
+
+Sparse FDA can accommodate irregular observations, but missingness caused by plant death or treatment response may not be ignorable. The method cannot infer the missing-data mechanism.
+
+# 31. Functional data from imaging
+
+A phenotyping pipeline can supply projected area, height, width, color indices, or texture traits repeatedly. Each trait can define a functional trajectory. FPCA can summarize between-plant trajectory variation before association with genotype or outcome.
+
+# 32. Functional data from remote sensing
+
+Plot-level vegetation indices over time can be analyzed similarly. Spatial dependence and cloud-driven missingness require additional care beyond the current package wrapper.
+
+# 33. Multi-environment trajectories
+
+The same genotype grown in multiple environments yields nested functional data. A single FPCA may mix genotype, environment, and interaction variation. Multilevel functional models are a future extension.
+
+# 34. Destructive harvest functional data
+
+A destructive series can define a plot-level population curve but not an individual-plant function across time unless the individual persists. Use the persistent plot as the functional unit only when this matches the design and scientific estimand.
+
+# 35. Functional derivatives
+
+FDA often allows derivatives of smooth functions. Version 0.3.0 exposes derivatives through `growth_smooth()` rather than directly through the FPCA wrapper. This keeps descriptive population-rate estimation separate from between-unit functional decomposition.
+
+# 36. FPCA and mixed models answer different questions
+
+Mixed models estimate population effects while accounting for dependence. FPCA summarizes dominant modes of curve variation. Neither is a universal replacement for the other.
+
+# 37. FPCA and parametric curves answer different questions
+
+Parametric curves produce traits such as asymptote and inflection under a specified equation. FPCA does not require that equation but produces components whose biological meaning must be interpreted from their shapes.
+
+# 38. FPCA and PCA on time columns
+
+Ordinary PCA on a matrix of six time columns can be useful when all units share those exact times. FDA extends the idea to smooth curves, irregular observations, and functional geometry [@RamsaySilverman2005].
+
+# 39. Scaling across traits
+
+The current FPCA analyzes one response at a time. Comparing height FPCA and biomass FPCA does not require standardizing their eigenfunctions together. Multivariate FPCA is a separate future extension.
+
+# 40. PVE is not predictive importance
+
+A component explaining little total variance can still be strongly associated with yield, stress tolerance, or genotype. PVE and scientific relevance are different concepts.
+
+# 41. Component selection
+
+Use PVE as one guide. Also inspect scree patterns, eigenfunction stability, score distributions, and downstream interpretability.
+
+# 42. Sensitivity to grid size
+
+```{r eval=FALSE}
+f51  <- growth_fpca(bean, time="day", response="height_cm", unit="plant_id", grid_n=51, npc=2)
+f101 <- growth_fpca(bean, time="day", response="height_cm", unit="plant_id", grid_n=101, npc=2)
+f201 <- growth_fpca(bean, time="day", response="height_cm", unit="plant_id", grid_n=201, npc=2)
+```
+
+A stable FPCA should not change scientifically merely because the discretization becomes moderately denser.
+
+# 43. Sensitivity to reconstruction
+
+Compare smoothing-spline and linear interpolation when temporal density is limited. Large changes signal that curve reconstruction is an important source of uncertainty.
+
+# 44. Sign alignment across fits
+
+When comparing eigenfunctions across resamples or engines, align component signs before computing differences. Otherwise an identical component can appear to reverse.
+
+# 45. Component switching
+
+If two eigenvalues are similar, component order can switch across resamples. Compare subspaces or interpret jointly rather than assuming FPC1 and FPC2 are individually stable.
+
+# 46. Methods template
+
+> Repeated plant trajectories were treated as functional observations. Each persistent plant was reconstructed over the common observed temporal support using smoothing splines, and functional principal component analysis was performed using an L2-scaled discretization. The number of retained components was selected to explain at least 95% of total functional variance, subject to inspection of eigenfunction interpretability. Component scores were retained at the plant level for subsequent design-aware analyses.
+
+# 47. Results template
+
+> The first two functional components summarized most trajectory variation. The dominant mode represented persistent differences in plant size across the observation period, whereas the second contrasted early and late growth, consistent with variation in developmental timing. Score distributions differed descriptively between water regimes, but formal treatment inference was conducted at the persistent-unit level with the experimental block structure retained.
+
+# 48. Common error: treating pixels as functional replicates
+
+If images contain thousands of pixels per plant, pixels are not independent longitudinal treatment replicates. The functional unit should match the experimental design.
+
+# 49. Common error: extrapolating missing seasons
+
+The built-in grid engine refuses nonoverlapping support. This is intentional.
+
+# 50. Common error: labeling FPC1 “growth rate” automatically
+
+A functional component can mix level, timing, and shape. Inspect the eigenfunction and reconstructed mean plus/minus modes.
+
+# 51. Common error: interpreting sign biologically
+
+Eigenfunction sign is arbitrary.
+
+# 52. Common error: using the same PVE threshold as a universal rule
+
+Ninety-five percent is a default, not a law. Low-variance biological modes can matter.
+
+# 53. Common error: ignoring smoothing sensitivity
+
+The functional representation precedes PCA. Errors in reconstruction propagate into components.
+
+# 54. Compact script
+
+```{r eval=FALSE}
+d <- growth_example_data("soybean_irregular")
+
+fp <- growth_fpca(
+  d,
+  time = "day",
+  response = "height_cm",
+  unit = "plant_id",
+  group = "water_regime",
+  engine = "grid",
+  grid_n = 101,
+  pve = .95,
+  smooth = "smooth_spline"
+)
+
+fp
+head(fp$scores_table)
+matplot(fp$grid, fp$eigenfunctions, type="l", lty=1)
+```
+
+# 55. Final perspective
+
+Functional analysis changes the unit of reasoning from isolated time points to complete trajectories. For plant science this is especially valuable as phenotyping becomes denser. The benefit is greatest when experimental-unit identity, temporal support, smoothing, and biological interpretation remain explicit.
+
+# References

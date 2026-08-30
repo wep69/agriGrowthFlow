@@ -1,0 +1,472 @@
+---
+title: "Growth Thresholds, Observation Schedules, Harvest Decisions, and Power"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Growth Thresholds, Observation Schedules, Harvest Decisions, and Power}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.5)
+```
+
+# Why decision functions need explicit assumptions
+
+A fitted growth curve is not a management recommendation. A decision requires a rule. Version 0.5.0 therefore separates biological thresholds, practical plateau definitions, economic harvest objectives, observation scheduling, design simulation, and power calculations.
+
+# Biological thresholds
+
+A threshold can be absolute or a fraction of a finite upper level.
+
+```{r}
+library(agriGrowthFlow)
+sun <- growth_example_data("sunflower_sigmoid")
+f <- growth_fit(subset(sun, cultivar=="C1"), "logistic", time="day", response="biomass_g")
+growth_threshold(f, .5, type="fraction")
+growth_threshold(f, 100, type="absolute")
+```
+
+A fractional threshold is unavailable for a model without a finite upper level, such as the expolinear curve. This is preferable to inventing an asymptote.
+
+# Practical plateau definitions
+
+Two definitions are implemented:
+
+1. response criterion: first time the curve reaches a specified fraction of its finite upper response;
+2. rate criterion: first time after maximum growth rate that the derivative falls below a specified fraction of the maximum rate.
+
+```{r}
+growth_plateau_time(f, criterion="response", response_fraction=.95)
+growth_plateau_time(f, criterion="rate", rate_fraction=.05)
+```
+
+The defaults 95% response and 5% of maximum rate are conventions, not biological laws. Sensitivity should be reported when the decision changes materially across plausible thresholds.
+
+# Conditional harvest optimization
+
+`growth_harvest_opt()` maximizes
+
+$$
+V(t)=P\,y(t)e^{-d(t-t_0)}-C_t(t-t_0)-C_h,
+$$
+
+where $P$ is value per unit response, $d$ is a continuous discount rate, $C_t$ is cost per time, and $C_h$ is a fixed harvest cost.
+
+```{r}
+h <- growth_harvest_opt(f, price=1, cost_per_time=.2, discount_rate=.005)
+h
+head(h$curve)
+```
+
+The optimum is conditional on the selected growth model and the economic inputs. It should be accompanied by sensitivity analysis.
+
+# Observation schedules
+
+Equal spacing is easy to communicate and often defensible.
+
+```{r}
+growth_schedule(time_range=c(0,80), n=7, method="equal")
+```
+
+When a pilot curve is available, the rate-curvature heuristic allocates relatively more sampling effort where the first and second derivatives are large.
+
+```{r}
+growth_schedule(f, n=7, method="rate_curvature")
+```
+
+This is not D-optimal design. It is a transparent teaching and planning heuristic. Exact optimal design depends on the estimand, parameter covariance, error structure, model, and logistical constraints.
+
+# Simulation before field work
+
+```{r}
+sim <- growth_design_sim(
+  "logistic",
+  c(asym=100, mid=30, scale=8),
+  times=seq(0,60,10),
+  n_unit=12,
+  sigma=3,
+  random_asym_sd=.08,
+  seed=42
+)
+head(sim)
+```
+
+Treatment multipliers can be used to generate a simple effect on the upper-level parameter.
+
+```{r}
+sim2 <- growth_design_sim(
+  "logistic",
+  c(asym=100, mid=30, scale=8),
+  times=seq(0,60,10),
+  n_unit=16,
+  sigma=3,
+  treatment=rep(c("control","treatment"), each=8),
+  treatment_multiplier=c(control=1, treatment=1.15),
+  seed=43
+)
+```
+
+Simulation is most useful when assumptions are varied. One simulated data set is an illustration, not evidence that the proposed design will always work.
+
+# Trait-level Monte Carlo power
+
+Suppose pilot work suggests that $t_{50}$ has between-unit standard deviation of 8 days and the scientifically relevant treatment difference is 5 days.
+
+```{r}
+p20 <- growth_power(effect=5, trait_sd=8, n_unit=20, n_sim=2000, seed=1)
+p40 <- growth_power(effect=5, trait_sd=8, n_unit=40, n_sim=2000, seed=1)
+p20
+p40
+```
+
+This is a trait-level approximation. It assumes the derived trait is available per unit and approximately characterized by the supplied standard deviation. It does not simulate nonlinear fitting failures, covariance structures, missing data, or Bayesian posterior uncertainty.
+
+# Design escalation
+
+Use the lightest planning method that answers the real question.
+
+- If the goal is approximate power for a stable derived trait, `growth_power()` may be adequate.
+- If nonlinear estimation uncertainty matters, simulate raw trajectories with `growth_design_sim()` and refit them in a custom loop.
+- If repeated-measure covariance matters, simulate the covariance structure explicitly.
+- If the final analysis is Bayesian, perform simulation-based calibration or posterior decision analysis in the intended model.
+
+# Sensitivity analysis for harvest
+
+A single optimum can conceal substantial uncertainty. Repeat the calculation across price, time cost, discount, curve family, and parameter uncertainty.
+
+```{r, eval=FALSE}
+prices <- c(.8,1,1.2)
+costs <- c(.1,.2,.4)
+grid <- expand.grid(price=prices, cost=costs)
+grid$time <- mapply(function(p,c) growth_harvest_opt(f, price=p, cost_per_time=c)$optimum_time,
+                    grid$price, grid$cost)
+grid
+```
+
+# Common errors
+
+1. Calling 95% of asymptote a physiological maturity date without biological validation.
+2. Optimizing harvest beyond the observed support without reporting extrapolation.
+3. Treating economic inputs as fixed truths rather than assumptions.
+4. Presenting the rate-curvature schedule as optimal design.
+5. Estimating power only after the experiment and describing it as prospective planning.
+6. Using an unrealistically small pilot trait SD.
+7. Ignoring nonlinear fit failure in high-stakes design decisions.
+
+# Reporting template
+
+State the exact threshold or objective function, units, observed support, candidate time interval, all economic assumptions, sampling schedule rule, simulation model, residual variation, between-unit variation, effect size, number of Monte Carlo replicates, and random seed.
+
+# Exercises
+
+## Exercise 1
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.1)
+```
+
+## Exercise 2
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.15000000000000002)
+```
+
+## Exercise 3
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.2)
+```
+
+## Exercise 4
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.25)
+```
+
+## Exercise 5
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.05)
+```
+
+## Exercise 6
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.1)
+```
+
+## Exercise 7
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.15000000000000002)
+```
+
+## Exercise 8
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.2)
+```
+
+## Exercise 9
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.25)
+```
+
+## Exercise 10
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.05)
+```
+
+## Exercise 11
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.1)
+```
+
+## Exercise 12
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.15000000000000002)
+```
+
+## Exercise 13
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.2)
+```
+
+## Exercise 14
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.25)
+```
+
+## Exercise 15
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.05)
+```
+
+## Exercise 16
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.1)
+```
+
+## Exercise 17
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.15000000000000002)
+```
+
+## Exercise 18
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.2)
+```
+
+## Exercise 19
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.25)
+```
+
+## Exercise 20
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.05)
+```
+
+## Exercise 21
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.1)
+```
+
+## Exercise 22
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.15000000000000002)
+```
+
+## Exercise 23
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.2)
+```
+
+## Exercise 24
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.25)
+```
+
+## Exercise 25
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.05)
+```
+
+## Exercise 26
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.1)
+```
+
+## Exercise 27
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.15000000000000002)
+```
+
+## Exercise 28
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.2)
+```
+
+## Exercise 29
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.25)
+```
+
+## Exercise 30
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.05)
+```
+
+## Exercise 31
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.1)
+```
+
+## Exercise 32
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.98)
+growth_harvest_opt(f, price=1, cost_per_time=0.15000000000000002)
+```
+
+## Exercise 33
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9)
+growth_harvest_opt(f, price=1, cost_per_time=0.2)
+```
+
+## Exercise 34
+
+Using the sunflower logistic fit, calculate the 90%, 95%, and 99% response plateau times. Repeat harvest optimization under at least three values of time cost. Then compare an equal seven-date schedule with the rate-curvature schedule and explain which part of the curve receives additional attention. Finally, evaluate trait-level power for two sample sizes and two effect sizes.
+
+```{r, eval=FALSE}
+growth_plateau_time(f, criterion="response", response_fraction=0.9400000000000001)
+growth_harvest_opt(f, price=1, cost_per_time=0.25)
+```
+
+# References
+
+For broad growth-model and yield-density context see @Panik2014. The design principles should also be read together with the experimental-unit concerns in @KeulsGarretsen1982.

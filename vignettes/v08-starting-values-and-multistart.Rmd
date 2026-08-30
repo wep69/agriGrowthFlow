@@ -1,0 +1,353 @@
+---
+title: "Starting Values, Bounds, and Multistart Growth Fitting"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Starting Values, Bounds, and Multistart Growth Fitting}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+# Why initialization matters
+
+Nonlinear regression is an optimization problem. A biologically reasonable equation can fail numerically when the starting point is poor, when parameters are weakly identified, or when the observed time support does not contain enough information about the curve shape.
+
+Agricultural nonlinear modeling therefore requires more than one successful call to an optimizer [@ArchontoulisMiguez2015].
+
+Version 0.2.0 exposes starting values and bounds before fitting so that optimization is auditable.
+
+# Example data
+
+```{r}
+d <- growth_example_data("sunflower_sigmoid")
+d <- subset(d, cultivar == unique(d$cultivar)[1])
+summary(d$biomass_g)
+range(d$day)
+```
+
+# Inspect logistic starts
+
+```{r}
+st <- growth_start(d, "logistic", time = "day", response = "biomass_g")
+st
+```
+
+The object contains:
+
+- public automatic starts;
+- public hard bounds;
+- internal starts and bounds used by the optimizer;
+- observation count;
+- time and response ranges;
+- aggregation description.
+
+```{r}
+st$start
+st$lower
+st$upper
+```
+
+These values are initialization aids. They are not estimates and must not be reported as fitted biological parameters.
+
+# How starts are generated
+
+Automatic starts use simple empirical features:
+
+- observed maximum to initialize an upper level;
+- the time near half the observed maximum for a transition location;
+- the observed time range for a scale parameter;
+- finite-difference slopes for expolinear and beta-growth initialization.
+
+The heuristics deliberately avoid pretending to solve the nonlinear model before optimization.
+
+# Hard bounds and search space
+
+Bounds serve two purposes.
+
+First, they keep structurally positive parameters positive.
+
+Second, they prevent obviously meaningless numerical excursions during fitting.
+
+A hard bound is not evidence that the true biological parameter lies near that value. If a fitted coefficient approaches a bound, `growth_diagnose()` reports the proximity as an issue.
+
+# User-supplied starting values
+
+Starting values must be named.
+
+```{r eval=FALSE}
+growth_fit(
+  d,
+  "logistic",
+  time = "day",
+  response = "biomass_g",
+  start = c(asym = 230, mid = 35, scale = 8)
+)
+```
+
+An unnamed vector is rejected because positional matching is fragile and difficult to audit.
+
+```{r eval=FALSE}
+growth_fit(
+  d,
+  "logistic",
+  time = "day",
+  response = "biomass_g",
+  start = c(230, 35, 8)
+)
+```
+
+# Beta-growth starts are public, optimization is constrained internally
+
+The beta-growth model has public parameters `wmax`, `tm`, and `te`. The biological requirement `te > tm` cannot be guaranteed by independent box bounds on `tm` and `te`.
+
+The package therefore optimizes an internal positive gap:
+
+\[
+\mathrm{gap}=t_e-t_m.
+\]
+
+`growth_start()` still presents the user-facing quantities.
+
+```{r eval=FALSE}
+growth_start(d, "beta_growth", time = "day", response = "biomass_g")
+```
+
+A user-supplied beta start must satisfy `te > tm`.
+
+# Why multistart is not optional decoration
+
+A single converged solution is not proof that the optimizer found the best supported minimum.
+
+`growth_multistart()` repeatedly perturbs the automatic or user-supplied start within the hard bounds.
+
+```{r}
+f <- growth_multistart(
+  d,
+  "logistic",
+  time = "day",
+  response = "biomass_g",
+  n_start = 8,
+  seed = 8128
+)
+f
+```
+
+# Audit every fitting attempt
+
+```{r}
+f$attempts
+```
+
+The attempts table records:
+
+- attempt number;
+- convergence indicator;
+- residual sum of squares;
+- warnings;
+- errors;
+- starting values used.
+
+Failed attempts are intentionally retained. Hiding them would make a numerically fragile fit appear more stable than it was.
+
+# Reproducibility with seed
+
+Use a fixed seed when multistart results are part of a reproducible report.
+
+```{r}
+f1 <- growth_multistart(d, "logistic", time = "day", response = "biomass_g", n_start = 5, seed = 44)
+f2 <- growth_multistart(d, "logistic", time = "day", response = "biomass_g", n_start = 5, seed = 44)
+coef(f1)
+coef(f2)
+```
+
+The scientific conclusion should not depend materially on one arbitrary random initialization pattern.
+
+# Base R engine
+
+The complete default engine is bounded base-R `nls()` using the `port` algorithm.
+
+```{r}
+f_base <- growth_fit(
+  d,
+  "gompertz",
+  time = "day",
+  response = "biomass_g",
+  n_start = 5,
+  seed = 2,
+  engine = "nls"
+)
+f_base
+```
+
+# Optional minpack.lm engine
+
+If `minpack.lm` is installed, `engine = "auto"` can use `nlsLM()`. The optional package is never installed automatically.
+
+```{r eval=FALSE}
+f_lm <- growth_fit(
+  d,
+  "gompertz",
+  time = "day",
+  response = "biomass_g",
+  n_start = 10,
+  seed = 2,
+  engine = "minpack.lm"
+)
+```
+
+A package workflow should remain functional with the base engine so that an optional numerical backend does not become a hidden mandatory dependency.
+
+# Design-aware preparation happens before starts
+
+Consider the serial destructive teaching data.
+
+```{r}
+sun <- growth_example_data("sunflower_sigmoid")
+s1 <- subset(sun, cultivar == unique(sun$cultivar)[1])
+g <- growth_data(
+  s1,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  plot = "plot_id",
+  block = "block",
+  total_mass = "biomass_g"
+)
+```
+
+With `aggregate = "auto"`, destructive subsamples within the same persistent plot and time are averaged before the nonlinear fitting problem is constructed.
+
+```{r}
+st_g <- growth_start(g, "logistic")
+st_g$aggregation
+```
+
+This is methodologically different from treating harvested subsamples as longitudinal subjects.
+
+# Treatment pooling warning
+
+If a treatment role is declared and multiple levels are present, a fit without `group` pools those treatments. `growth_fit()` warns because a pooled curve can obscure biologically important structure.
+
+```{r eval=FALSE}
+g_all <- growth_data(
+  sun,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  treatment = "cultivar",
+  total_mass = "biomass_g"
+)
+growth_fit(g_all, "logistic")
+```
+
+To describe separate curves:
+
+```{r eval=FALSE}
+growth_fit(g_all, "logistic", group = "cultivar", n_start = 10, seed = 10)
+```
+
+Separate curves are descriptive. They are not a formal treatment hypothesis test.
+
+# Common numerical warning patterns
+
+## Too few distinct times
+
+At least four complete observations at four distinct times are required by the current parametric layer.
+
+Four times are a minimum software gate, not a general claim that four harvests are sufficient for every nonlinear equation.
+
+## Weak late support
+
+If the last observation occurs well before the upper region of a sigmoid trajectory, asymptote and scale can compensate for one another.
+
+More starts cannot create missing biological information.
+
+## Weak early support
+
+When measurements start near the inflection region, an origin or early-rate parameter can be weakly identified.
+
+## Over-flexible shape
+
+A Richards or Weibull shape parameter can improve residual fit while increasing covariance conditioning and extrapolation uncertainty.
+
+# Diagnose numerical stability
+
+```{r}
+diag <- growth_diagnose(f)
+diag$summary
+diag$boundaries
+diag$issues
+```
+
+Important questions:
+
+1. How many starts converged?
+2. Did converged starts reach similar RSS values?
+3. Is a coefficient near a hard bound?
+4. Is the covariance condition number very large?
+5. Does the fitted curve depend strongly on a flexible shape parameter?
+
+# Starting values are not a model-selection criterion
+
+A model should not be selected because it was easier to initialize. Conversely, repeated numerical failure is useful information about the relationship between the model and the available data.
+
+If one candidate requires extreme starts and repeatedly reaches boundaries while a simpler candidate is stable, report that difference.
+
+# Recommended workflow
+
+```{r}
+growth_start(d, "logistic", time = "day", response = "biomass_g")
+
+fit <- growth_multistart(
+  d,
+  "logistic",
+  time = "day",
+  response = "biomass_g",
+  n_start = 20,
+  seed = 123
+)
+
+growth_diagnose(fit)
+growth_traits(fit)
+```
+
+# Reproducibility checklist
+
+Record:
+
+- package version;
+- model name and exact parameterization;
+- engine;
+- number of starts;
+- random seed;
+- automatic or user-supplied starting values;
+- parameter bounds;
+- number of converged starts;
+- selected RSS;
+- warnings retained in the attempts table;
+- amount of observed time support.
+
+# What not to do
+
+Do not delete failed starts before reporting convergence stability.
+
+Do not enlarge bounds repeatedly until a biologically meaningless parameter value is accepted.
+
+Do not interpret a boundary-hitting asymptote as a precise biological estimate.
+
+Do not use multistart as a substitute for additional harvest dates when the curve is poorly supported.
+
+Do not compare separate models fitted to different observations merely because both converged.
+
+# Next vignette
+
+Continue with `v09-model-comparison-diagnostics.Rmd` for same-observation comparison, residual summaries, prediction intervals, and interpretation of numerical diagnostics.

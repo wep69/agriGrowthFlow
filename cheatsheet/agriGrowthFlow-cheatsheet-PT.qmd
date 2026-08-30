@@ -1,0 +1,195 @@
+---
+title: "agriGrowthFlow 1.0.0: Cheatsheet PT-BR"
+subtitle: "Fluxo auditavel para analise de crescimento vegetal com unidade experimental persistente"
+author: "Walter E. Pereira e Magali H. Pereira Martinez"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    theme: cosmo
+execute:
+  freeze: auto
+  warning: false
+  message: false
+bibliography: ../vignettes/references.bib
+---
+
+::: {.callout-note}
+## Conceito-chave
+
+Declare a unidade experimental persistente e o mecanismo de amostragem antes de ajustar ou interpretar qualquer trajetoria de crescimento.
+:::
+
+# Pergunta do dominio
+
+Como comparar tratamentos quando as medidas sao repetidas na mesma planta ou quando as colheitas sao destrutivas em parcelas diferentes?
+
+# Dados de ensino
+
+Todos os dados sao simulados e congelados para teste de software, nao sao evidencia de campo.
+
+```{r}
+library(agriGrowthFlow)
+maize <- growth_example_data("maize_destructive")
+bean <- growth_example_data("bean_repeated")
+sun <- growth_example_data("sunflower_sigmoid")
+dim(maize); dim(bean); dim(sun)
+```
+
+# Fluxo 1: fator qualitativo com bloco
+
+```{r}
+gmaize <- growth_data(
+  maize, time="day", sampling="destructive",
+  experimental_unit="plot_id", treatment="nitrogen", block="block",
+  total_mass="total_mass_g", leaf_area="leaf_area_m2"
+)
+growth_validate(gmaize)
+growth_plan(gmaize)
+
+cf <- growth_curve_coefficients(maize, time="day", response="total_mass_g",
+  unit="plot_id", group="nitrogen", degree=2)
+head(cf)
+
+mv <- growth_manova(maize, time="day", response="total_mass_g",
+  unit="plot_id", group="nitrogen", degree=2)
+mv$multivariate
+```
+
+::: {.callout-tip}
+## Dica de estudo
+
+Letras de agrupamento sao calculadas dentro de cada estrato; familias incompletas sao recusadas.
+:::
+
+# Fluxo 2: fator quantitativo com regressao nao linear
+
+```{r}
+one <- subset(sun, cultivar == unique(sun$cultivar)[1])
+fit <- growth_fit(one, "logistic", time="day", response="biomass_g", n_start=5, seed=20260827)
+fit
+growth_traits(fit)
+growth_predict(fit, time=seq(10,70,10), interval="confidence")
+growth_diagnose(fit)
+```
+
+# Fluxo 3: quali + quanti (mistura)
+
+```{r}
+fit_set <- growth_fit(one, c("logistic","gompertz"), time="day", response="biomass_g",
+  n_start=5, seed=20260827)
+fit_set
+growth_compare(fit_set)
+```
+
+# Fluxo 4: comparacao de modelos com tabela de qualidade
+
+```{r}
+comp <- growth_compare(fit_set)
+comp[, c("model","n","rmse","aic","aicc","delta_aicc","akaike_weight")]
+
+# Exemplo com grupo: um ajuste por cultivar
+fit_grp <- growth_fit(sun, "logistic", time="day", response="biomass_g",
+  group="cultivar", n_start=3, seed=20260827)
+fit_grp
+```
+
+::: {.callout-warning}
+## Erro comum
+
+Comparacao de modelos so e valida para as mesmas observacoes preparadas. O pacote recusa comparacoes com chaves diferentes.
+:::
+
+# Longitudinal e flexivel
+
+```{r}
+if (requireNamespace("nlme", quietly=TRUE)) {
+  gbean <- growth_data(bean, time="day", sampling="repeated",
+    experimental_unit="plant_id", treatment="water_regime", block="block",
+    leaf_area="projected_leaf_area_m2")
+  m <- growth_mixed(gbean, response="height_cm", degree=2, random_degree=1)
+  print(m)
+}
+
+s <- growth_smooth(bean, time="day", response="height_cm", method="smooth_spline")
+growth_smooth_predict(s, n=30)
+growth_derivative(s, order=1, n=30)
+```
+
+# Incerteza com bootstrap
+
+```{r}
+one <- subset(sun, cultivar == unique(sun$cultivar)[1])
+fit2 <- growth_fit(one, "logistic", time="day", response="biomass_g", n_start=3, seed=1)
+b <- growth_boot(fit2, R=200, seed=20260827)
+growth_boot_ci(b, source="coefficients")
+```
+
+::: {.callout-important}
+## Informacao critica
+
+Bootstrap deve preservar a hierarquia experimental. Metodos `cluster` reamostram trajetorias completas.
+:::
+
+# Workflow consolidado 1.0.0
+
+```{r}
+sun <- growth_example_data("sunflower_sigmoid")
+plan <- growth_workflow(sun, time="day", response="biomass_g",
+  strategy="parametric", models=c("logistic","gompertz"), n_start=5, seed=20260827)
+growth_workflow_audit(plan)
+growth_table(plan, "traits")
+td <- tempfile("bundle_")
+growth_export(plan, td, format="bundle")
+list.files(td)
+```
+
+# Diagrama
+
+```{mermaid}
+flowchart TD
+  A[Declarar unidade persistente] --> B[Validar amostragem]
+  B --> C[Indices classicos]
+  C --> D{Ajuste parametrico?}
+  D -->|sim| E[Multi-start + diagnostico]
+  D -->|nao| F[Smooth / FPCA / MANOVA]
+  E --> G[Traços biologicos]
+  F --> G
+  G --> H[Bootstrap / Bayes opt]
+  H --> I[Auditoria + bundle]
+```
+
+# Boas praticas
+
+- Nao trate subamostras destrutivas como individuos longitudinais.
+- Diagnostique covariancia, heterogeneidade e suporte antes de conclusoes.
+- Relate suposicoes economicas condicionais em `growth_harvest_opt()`.
+
+# Exercicios
+
+::: {.callout-caution collapse="true"}
+## Solucoes
+
+1. Refaça o fluxo 2 com `n_start=10` e compare R².
+2. Troque `growth_smooth` method para `loess` span 0.75 e avalie a derivada.
+:::
+
+# Como citar
+
+```{r}
+citation("agriGrowthFlow")
+packageVersion("agriGrowthFlow")
+R.version.string
+```
+
+```{r}
+# numeros dinamicos
+fit <- growth_fit(subset(sun, cultivar==unique(sun$cultivar)[1]), "logistic", time="day", response="biomass_g", n_start=3, seed=1)
+tr <- growth_traits(fit)
+cat("Taxa maxima:", round(tr$maximum_absolute_rate,2), "em", round(tr$time_maximum_rate,1), "dias\n")
+```

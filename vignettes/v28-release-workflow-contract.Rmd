@@ -1,0 +1,631 @@
+---
+title: "agriGrowthFlow 1.0.0: Release Workflow Contract"
+author: "agriGrowthFlow team"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 1.0.0: Release Workflow Contract}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+link-citations: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.5)
+library(agriGrowthFlow)
+```
+
+# Purpose
+
+Version 1.0.0 consolidates the specialist layers developed in earlier releases into one stable analysis contract.
+
+The consolidated workflow is not intended to replace the specialist functions.
+
+Its purpose is to make five decisions visible:
+
+1. what the experimental unit is;
+2. how time was sampled;
+3. what scientific objective is being addressed;
+4. what core analysis family was selected;
+5. whether uncertainty was actually propagated.
+
+Plant growth analysis starts from the sampling design, not from a preferred curve.
+
+This principle is consistent with the classical growth-analysis literature and with early statistical discussions of plant growth curves [@Hunt1990; @KeulsGarretsen1982].
+
+# Learning objectives
+
+After working through this vignette, the reader should be able to:
+
+* create a declared growth-data object;
+* inspect validation before fitting;
+* use `growth_method_guide()` without interpreting it as an automatic scientific verdict;
+* freeze a planning-only workflow;
+* execute an explicit parametric, mixed, smooth, classical, or multiphase strategy;
+* understand what the workflow stores;
+* audit the analysis contract;
+* distinguish model comparison from scientific decision making;
+* attach uncertainty only when its assumptions are appropriate;
+* move from the consolidated workflow back to the specialist modules when needed.
+
+# 1. Why a release contract is useful
+
+A growth-analysis script often accumulates decisions gradually.
+
+The response may be transformed.
+
+One model may fail to converge.
+
+A different covariance structure may be tried.
+
+A bootstrap may later be added.
+
+A treatment comparison may be performed on a derived trait.
+
+If these decisions are not recorded, the final result can be difficult to reconstruct.
+
+The 1.0.0 workflow stores the analysis contract explicitly.
+
+It does not remove analyst responsibility.
+
+It makes that responsibility easier to review.
+
+# 2. Start with a declared design
+
+The destructive maize example contains multiple sampled plants within plot and harvest date.
+
+The plot is the persistent experimental unit.
+
+Different plants harvested at different dates are not repeated observations of one plant.
+
+```{r maize-data}
+maize <- growth_example_data("maize_destructive")
+head(maize)
+```
+
+```{r maize-declare}
+gm <- growth_data(
+  maize,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  treatment = "nitrogen",
+  block = "block",
+  total_mass = "total_mass_g",
+  leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g",
+  ground_area = "ground_area_m2"
+)
+gm
+```
+
+The role declaration does not change the observations.
+
+It records how columns should be interpreted.
+
+# 3. Validate before selecting a method
+
+```{r maize-validate}
+growth_validate(gm)
+```
+
+Validation is a gate, not proof that the experiment is scientifically valid.
+
+It can detect structural conflicts that are visible in the supplied data and role map.
+
+It cannot recover design information that was never recorded.
+
+A useful rule is:
+
+> If the software cannot identify the persistent experimental unit, the analyst should not ask it to infer longitudinal dependence.
+
+# 4. Build a design-aware plan
+
+```{r maize-plan}
+growth_plan(gm)
+```
+
+The plan emphasizes operations supported by the declared biological variables.
+
+For example, total mass enables AGR and RGR.
+
+Total mass plus leaf area supports NAR.
+
+Leaf area and ground area support LAI and LAD.
+
+These relationships follow the classical plant growth-analysis framework [@Hunt1990].
+
+# 5. Method guidance is not model selection
+
+```{r guide-rates}
+growth_method_guide(gm, objective = "rates")
+```
+
+For an interval-rate objective, classical analysis receives high priority because it directly targets the requested quantities.
+
+Now change the objective.
+
+```{r guide-trajectory}
+growth_method_guide(gm, objective = "trajectory")
+```
+
+The ranking changes because the scientific question changed.
+
+The guide does not use a universal p-value threshold.
+
+It does not use R-squared as a universal selector.
+
+It does not treat AICc as proof that one biological model is true.
+
+The `priority` column is a navigation rule.
+
+The `rationale` column explains why the rule was applied.
+
+The `minimum_requirement` column identifies what still has to be checked.
+
+# 6. Planning-only mode
+
+Before fitting any model, freeze the proposed analysis.
+
+```{r planning-only}
+plan_only <- growth_workflow(
+  gm,
+  objective = "trajectory",
+  strategy = "auto",
+  execute = FALSE,
+  seed = 2026
+)
+plan_only
+```
+
+Planning-only mode is useful for:
+
+* preregistration;
+* project meetings;
+* thesis analysis plans;
+* internal review;
+* teaching;
+* documenting why a strategy was chosen before seeing final inferential output.
+
+Inspect the audit.
+
+```{r planning-audit}
+growth_workflow_audit(plan_only)
+```
+
+The missing core model is `INFO`, not `FAIL`, because no fit was requested.
+
+# 7. Explicit strategies are preferred for final analyses
+
+Automatic mode is useful for navigation.
+
+For a final scientific analysis, an explicit strategy is easier to defend.
+
+The analyst can state exactly what was fitted and why.
+
+# 8. Parametric trajectory workflow
+
+Use the sigmoid teaching data.
+
+```{r sunflower}
+sun <- growth_example_data("sunflower_sigmoid")
+sun1 <- subset(sun, cultivar == unique(cultivar)[1])
+```
+
+Fit two candidate curves.
+
+```{r parametric-workflow}
+wp <- growth_workflow(
+  sun1,
+  time = "day",
+  response = "biomass_g",
+  objective = "trajectory",
+  strategy = "parametric",
+  models = c("logistic", "gompertz"),
+  n_start = 5,
+  seed = 103
+)
+wp
+```
+
+The workflow stores the fit set rather than discarding alternative candidates.
+
+```{r parametric-components}
+names(wp)
+```
+
+Important components include:
+
+* `validation`;
+* `plan`;
+* `guide`;
+* `decision_ledger`;
+* `core`;
+* `diagnostics`;
+* `comparison`;
+* `traits`;
+* `uncertainty`;
+* `notes`.
+
+# 9. Candidate comparison has a restricted meaning
+
+```{r compare-table}
+growth_table(wp, component = "comparison")
+```
+
+The comparison is valid only because the candidate models were fitted to the same prepared observations.
+
+Information criteria summarize predictive fit with complexity penalties.
+
+They do not establish biological truth.
+
+Parameter plausibility, residual behavior, uncertainty, experimental design, and the purpose of the analysis still matter [@ArchontoulisMiguez2015].
+
+# 10. Derived traits are often easier to interpret than coefficients
+
+```{r trait-table}
+growth_table(wp, component = "traits")
+```
+
+A coefficient called `scale` has model-specific meaning.
+
+A trait such as time to 50 percent of the upper level is easier to compare across several sigmoid families.
+
+The package therefore keeps both parameter and trait views.
+
+# 11. Diagnostics remain visible
+
+For a candidate fit set, diagnostics are nested by model.
+
+```{r diagnostic-classes}
+lapply(wp$diagnostics, class)
+```
+
+This nesting is deliberate.
+
+`growth_table()` refuses to flatten a nested diagnostic collection automatically because doing so could hide model-specific structure.
+
+Extract the model you actually want to inspect.
+
+```{r one-diagnostic}
+wp$diagnostics$logistic
+```
+
+# 12. Repeated measurements change the problem
+
+Now consider a nondestructive repeated-measurement experiment.
+
+```{r bean-data}
+bean <- growth_example_data("bean_repeated")
+head(bean)
+```
+
+A plant identifier persists across time.
+
+A treatment comparison should preserve that dependence.
+
+```{r guide-repeated}
+growth_method_guide(
+  bean,
+  time = "day",
+  response = "height_cm",
+  unit = "plant_id",
+  group = "water_regime",
+  objective = "treatment_comparison"
+)
+```
+
+If `nlme` is installed, the mixed strategy becomes a natural candidate.
+
+Mixed-effects modeling separates population-level trajectories from persistent-unit deviations [@PinheiroBates2000; @Mirman2014].
+
+```{r mixed-workflow, eval=FALSE}
+wm <- growth_workflow(
+  bean,
+  time = "day",
+  response = "height_cm",
+  unit = "plant_id",
+  group = "water_regime",
+  objective = "treatment_comparison",
+  strategy = "mixed",
+  mixed_degree = 2,
+  correlation = "car1"
+)
+wm
+```
+
+The consolidated layer does not hide the fitted `nlme::lme` object.
+
+It remains accessible through `wm$core$fit`.
+
+# 13. Flexible trajectory workflow
+
+Smooth curves are useful when the data do not clearly support one named growth function.
+
+The history of plant growth analysis includes regression smoothers precisely because a single parametric form cannot represent every trajectory [@ShipleyHunt1996].
+
+```{r smooth-workflow}
+ws <- growth_workflow(
+  bean,
+  time = "day",
+  response = "height_cm",
+  unit = "plant_id",
+  group = "water_regime",
+  strategy = "smooth",
+  smooth_method = "smooth_spline",
+  seed = 104
+)
+ws
+```
+
+```{r smooth-traits}
+growth_table(ws, component = "traits")
+```
+
+A population smoother is descriptive.
+
+It should not be presented as a replacement for a covariance model when the inferential question concerns repeated units.
+
+# 14. Multiphase workflow
+
+Some biological trajectories contain more than one growth phase.
+
+```{r coffee-data}
+coffee <- growth_example_data("coffee_diphasic")
+coffee1 <- subset(coffee, treatment == "control")
+```
+
+```{r multiphase-workflow}
+wmulti <- growth_workflow(
+  coffee1,
+  time = "day",
+  response = "biomass_g",
+  objective = "phases",
+  strategy = "multiphase",
+  n_start = 5,
+  seed = 105
+)
+wmulti
+```
+
+For sums of logistic components, inflection and stability behavior belongs to the complete summed trajectory.
+
+It should not be inferred by simply copying the component-specific formulas [@MischanEtAl2015].
+
+# 15. Classical workflow
+
+For classical rates, use the declared biological roles.
+
+```{r classical-workflow}
+wc <- growth_workflow(
+  gm,
+  objective = "rates",
+  strategy = "classical",
+  execute = TRUE
+)
+wc
+```
+
+```{r classical-table}
+head(growth_table(wc$core, component = "intervals"))
+```
+
+Destructive subsamples are reduced within persistent experimental unit and harvest date before intervals are formed.
+
+This protects the experimental hierarchy.
+
+# 16. Uncertainty is a separate layer
+
+The consolidated workflow isolates uncertainty-specific arguments.
+
+This prevents arguments intended for the core model from being passed accidentally to the bootstrap or Bayesian engine.
+
+For a bootstrap workflow:
+
+```{r bootstrap-workflow, eval=FALSE}
+wu <- growth_workflow(
+  sun1,
+  time = "day",
+  response = "biomass_g",
+  objective = "uncertainty",
+  strategy = "parametric",
+  models = c("logistic", "gompertz"),
+  n_start = 5,
+  uncertainty = "bootstrap",
+  bootstrap_R = 999,
+  uncertainty_args = list(method = "case", n_start = 1),
+  seed = 106
+)
+```
+
+Bootstrap design must follow the experimental design [@DavisonHinkley1997].
+
+Repeated units generally require cluster-level resampling rather than row-level resampling.
+
+# 17. Bayesian uncertainty remains optional
+
+The Bayesian convenience layer supports Logistic, Gompertz, and Richards models.
+
+It uses `brms` and a Stan backend when requested [@Buerkner2017].
+
+```{r bayes-workflow, eval=FALSE}
+wb <- growth_workflow(
+  sun1,
+  time = "day",
+  response = "biomass_g",
+  objective = "uncertainty",
+  strategy = "parametric",
+  models = "logistic",
+  uncertainty = "bayesian",
+  uncertainty_args = list(
+    chains = 4,
+    iter = 2000,
+    warmup = 1000,
+    cores = 4,
+    refresh = 0
+  ),
+  seed = 107
+)
+```
+
+A Bayesian fit is not complete when sampling finishes.
+
+R-hat, effective sample size, divergences, prior predictive behavior, and posterior predictive behavior still require review [@VehtariEtAl2021].
+
+# 18. What automatic mode does not do
+
+Automatic mode does not:
+
+* choose a publication conclusion;
+* prove one model is true;
+* replace biological knowledge;
+* repair pseudoreplication;
+* create missing experimental units;
+* infer unmeasured defoliation losses;
+* turn an observation-schedule heuristic into an optimal-design proof;
+* turn a conditional harvest objective into a universal agronomic recommendation.
+
+# 19. What the workflow audit checks
+
+```{r workflow-audit-parametric}
+growth_workflow_audit(wp)
+```
+
+The audit is intentionally simple.
+
+It asks whether the release contract is complete enough to review.
+
+A `PASS` means the gate is present.
+
+An `INFO` record means the item is absent, optional, or intentionally not executed.
+
+A `FAIL` means a release-level structural problem was detected.
+
+The audit does not replace model-specific diagnostics.
+
+# 20. Recommended analysis sequence
+
+A defensible sequence is:
+
+1. declare roles;
+2. validate design;
+3. inspect raw trajectories;
+4. state the scientific objective;
+5. review the method guide;
+6. freeze the planning-only workflow if the analysis is consequential;
+7. fit an explicit core strategy;
+8. inspect model-specific diagnostics;
+9. inspect derived biological traits;
+10. propagate uncertainty when required;
+11. audit the final workflow;
+12. export the complete object;
+13. report limitations with the result.
+
+# 21. Common error: treating the guide as a ranking contest
+
+The guide can show several methods as suitable.
+
+This is not a defect.
+
+Different methods answer different versions of a growth question.
+
+A parametric model may estimate a biologically interpretable asymptote.
+
+A smooth may better reveal local curvature.
+
+A mixed model may better address repeated-unit inference.
+
+A functional analysis may compare complete trajectories.
+
+The analyst chooses based on the scientific estimand and design.
+
+# 22. Common error: comparing models fitted to different data
+
+AIC, AICc, and BIC comparisons require comparable likelihoods and observations.
+
+`growth_compare()` refuses candidate comparisons when prepared observation keys differ.
+
+The release workflow retains this safeguard.
+
+# 23. Common error: claiming uncertainty without an uncertainty object
+
+A point estimate is not an uncertainty analysis.
+
+If `objective = "uncertainty"` but no uncertainty engine is executed, the workflow records a note.
+
+The report should reflect that limitation.
+
+# 24. Common error: using CSV as the only archive
+
+CSV is useful for inspection.
+
+It cannot preserve nested model objects, formulas, covariance structures, bootstrap draws, or Bayesian fits.
+
+Use RDS for the complete object.
+
+Use CSV as a review layer.
+
+# 25. Methods-writing template
+
+A concise Methods description can follow this structure:
+
+*The experimental unit and sampling mechanism were declared before analysis. Data structure was screened with `growth_validate()`. The scientific objective was recorded in an `agriGrowthFlow` workflow contract. Candidate analysis families were reviewed with `growth_method_guide()`, and the final core strategy was selected explicitly. Model-specific diagnostics were inspected before biological traits were interpreted. Uncertainty was propagated using the stated bootstrap or Bayesian procedure when applicable. The final workflow object, audit table, and analysis report were archived for reproducibility.*
+
+Adapt this text to the actual experiment.
+
+Do not report procedures that were not run.
+
+# 26. Results-writing template
+
+A Results section should emphasize biological quantities and their uncertainty.
+
+It should not reproduce every coefficient simply because the software printed them.
+
+A useful pattern is:
+
+*The selected trajectory model captured the observed temporal pattern without major diagnostic warnings. The estimated time to the specified biological threshold was X units, with uncertainty interval Y to Z. Candidate-model comparison was treated as supportive rather than decisive evidence. Conclusions were restricted to the experimental unit and treatment structure represented in the design.*
+
+Again, replace placeholders only with actual results.
+
+# 27. Connection to specialist vignettes
+
+The release workflow is an entry point.
+
+Use the specialist tutorials for depth:
+
+* `v02` to `v05` for classical growth analysis;
+* `v07` to `v11` for parametric curves;
+* `v12` to `v17` for longitudinal, smooth, and functional models;
+* `v18` to `v22` for bootstrap and Bayesian uncertainty;
+* `v23` to `v27` for biological events and decisions;
+* `v29` for audit, report, and export;
+* `v30` for the complete foundations-to-release workflow.
+
+# 28. Final checklist
+
+Before accepting a 1.0.0 workflow as an analysis record, confirm:
+
+- [ ] the persistent experimental unit is correct;
+- [ ] the sampling mechanism is correct;
+- [ ] time and response units are documented;
+- [ ] the scientific objective is explicit;
+- [ ] the selected method answers that objective;
+- [ ] candidate comparisons use identical prepared observations;
+- [ ] convergence has been checked;
+- [ ] residual or predictive diagnostics have been checked;
+- [ ] derived traits are biologically interpretable;
+- [ ] uncertainty matches the experimental design;
+- [ ] any extrapolation is explicitly justified;
+- [ ] the seed is recorded when stochastic computation is used;
+- [ ] the complete object is archived in RDS form;
+- [ ] limitations are included in the written interpretation.
+
+# 29. Take-home message
+
+The 1.0.0 workflow is a contract, not an oracle.
+
+Its value is transparency.
+
+It connects design, model, diagnostics, traits, uncertainty, and reporting without hiding the specialist objects that produced the result.
+
+That structure makes plant-growth analysis easier to review, teach, reproduce, and extend.

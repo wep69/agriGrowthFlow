@@ -1,0 +1,496 @@
+---
+title: "agriGrowthFlow 0.3.0: Flexible Smoothing, Derivatives, and Growth Landmarks"
+author: "agriGrowthFlow development team"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 0.3.0: Flexible Smoothing, Derivatives, and Growth Landmarks}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+
+# 1. Why flexible growth models belong in a plant-growth package
+
+A Logistic, Gompertz, Richards, beta, or expolinear curve can be biologically useful when its shape is plausible. No single parametric function, however, describes every species, environment, organ, stress response, recovery period, or senescence trajectory. Shipley and Hunt emphasized form-free smoothing as a way to estimate both trajectories and derivatives without imposing one global parametric equation [@ShipleyHunt1996].
+
+Version 0.3.0 therefore adds a flexible descriptive layer based on smoothing splines, LOESS, optional GAMs, and optional shape-constrained additive models.
+
+# 2. Questions answered by the flexible layer
+
+The new functions can address questions such as:
+
+- When is absolute canopy expansion fastest?
+- Does growth acceleration change sign?
+- Are there one or several inflection regions?
+- Does a stress treatment cause a temporary slowdown that a sigmoid curve hides?
+- Is the estimated trajectory monotonically increasing when biology requires it?
+- How sensitive are landmarks to the smoothing method?
+
+# 3. A functional view of growth rate
+
+Let a smooth trajectory be $W(t)$. Absolute instantaneous growth rate is
+
+$$
+G(t) = \frac{dW(t)}{dt}.
+$$
+
+Growth acceleration is
+
+$$
+A(t) = \frac{d^2W(t)}{dt^2}.
+$$
+
+For positive biomass, instantaneous relative growth rate can be written as
+
+$$
+RGR(t) = \frac{1}{W(t)}\frac{dW(t)}{dt}
+       = \frac{d\log W(t)}{dt}.
+$$
+
+The current public derivative function returns first and second derivatives of the response scale. Relative derivatives can be calculated explicitly when that transformation is scientifically justified.
+
+# 4. Teaching data
+
+```{r}
+bean <- growth_example_data("bean_repeated")
+irr  <- growth_example_data("soybean_irregular")
+```
+
+The bean series is regular. The soybean series has irregular observation times and 48 persistent plants.
+
+# 5. Population mean versus pooled observations
+
+`growth_smooth()` defaults to `population = TRUE`. It first preserves the persistent-unit structure and then constructs time-specific unit means before fitting a descriptive population curve. This prevents units with more subsamples at a particular time from receiving unintended extra weight.
+
+`population = FALSE` fits pooled observations. That can be useful for exploratory display but does not model within-unit dependence. The function warns accordingly.
+
+# 6. Smoothing spline
+
+```{r}
+s_h <- growth_smooth(
+  bean,
+  time = "day",
+  response = "height_cm",
+  group = "water_regime",
+  method = "smooth_spline"
+)
+s_h
+```
+
+A smoothing spline balances closeness to observations against roughness. In conceptual form it minimizes
+
+$$
+\sum_i \{y_i-f(t_i)\}^2 + \lambda\int \{f''(t)\}^2dt,
+$$
+
+where $\lambda$ controls smoothness. Shipley and Hunt discuss this compromise directly in plant growth analysis [@ShipleyHunt1996].
+
+# 7. Cross-validation for spline smoothing
+
+```{r}
+s_cv <- growth_smooth(
+  bean,
+  time = "day",
+  response = "height_cm",
+  method = "smooth_spline",
+  cv = TRUE
+)
+```
+
+Cross-validation is a useful data-driven rule, not an infallible biological criterion. Shipley and Hunt showed that bootstrap stabilization can improve smoothing-parameter choice in some plant-growth data sets [@ShipleyHunt1996]. A formal bootstrap smoothing module is reserved for the uncertainty layer.
+
+# 8. Predict a smooth curve
+
+```{r}
+p_h <- growth_smooth_predict(s_h, n = 80)
+head(p_h)
+```
+
+Predictions include a flag showing whether each time is inside the observed support. Flexible smooths should not be used casually for long extrapolation.
+
+# 9. First derivative
+
+```{r}
+d_h <- growth_derivative(s_h, order = 1, n = 80)
+head(d_h)
+```
+
+For base-R smoothing splines, the derivative is obtained directly from the fitted spline representation.
+
+# 10. Second derivative
+
+```{r}
+a_h <- growth_derivative(s_h, order = 2, n = 80)
+head(a_h)
+```
+
+The second derivative identifies curvature. A change from positive to negative acceleration is a candidate inflection region.
+
+# 11. `growth_acceleration()`
+
+```{r}
+growth_acceleration(s_h, n = 80)
+```
+
+This is an explicit alias for the second derivative. The name is useful in teaching because it keeps the biological interpretation visible.
+
+# 12. Boundary derivatives
+
+Numerical derivatives are less stable near boundaries. The package uses direct spline derivatives for `smooth_spline`; for LOESS, GAM, and SCAM it uses central finite differences inside the support and one-sided formulas near boundaries.
+
+Do not treat a sharp derivative at the first or last time as equally secure as an interior feature.
+
+# 13. LOESS
+
+```{r}
+s_l <- growth_smooth(
+  bean,
+  time = "day",
+  response = "projected_leaf_area_m2",
+  group = "water_regime",
+  method = "loess",
+  span = 0.75
+)
+```
+
+LOESS fits local low-degree polynomials. It is flexible and intuitive but can be sensitive to the span and can behave poorly at boundaries.
+
+# 14. Span sensitivity
+
+```{r eval=FALSE}
+s50 <- growth_smooth(bean, time="day", response="height_cm", method="loess", span=.50)
+s75 <- growth_smooth(bean, time="day", response="height_cm", method="loess", span=.75)
+s95 <- growth_smooth(bean, time="day", response="height_cm", method="loess", span=.95)
+```
+
+A scientifically important landmark that exists only at one narrow span deserves skepticism.
+
+# 15. GAM
+
+A generalized additive model expresses
+
+$$
+E(Y) = \beta_0 + f(t),
+$$
+
+with a penalized smooth $f(t)$. The optional `mgcv` engine estimates smoothness as part of model fitting.
+
+```{r}
+if (requireNamespace("mgcv", quietly = TRUE)) {
+  s_gam <- growth_smooth(
+    bean,
+    time = "day",
+    response = "height_cm",
+    method = "gam",
+    k = 6,
+    gam_method = "REML"
+  )
+  s_gam
+}
+```
+
+# 16. Basis dimension is not smoothing itself
+
+The GAM basis dimension `k` controls the maximum representational complexity available to the smooth. Penalization then determines effective complexity. Too small a basis can prevent the trajectory from representing genuine curvature; excessively large bases can waste computation or complicate diagnostics.
+
+# 17. Grouped smooths
+
+```{r}
+s_groups <- growth_smooth(
+  bean,
+  time = "day",
+  response = "height_cm",
+  group = "water_regime",
+  method = "smooth_spline"
+)
+```
+
+The result is a collection with one descriptive smooth per group. It is not a formal hypothesis test of group-specific smooth differences.
+
+# 18. Why separate curves are descriptive
+
+Fitting one curve per treatment does not model the full experimental hierarchy or estimate a joint covariance of treatment contrasts. Use `growth_mixed()` or a lower-level GAMM framework for formal longitudinal inference when needed.
+
+# 19. Flexible landmarks
+
+```{r}
+growth_smooth_traits(s_groups, n = 400)
+```
+
+The returned quantities include:
+
+- maximum estimated first derivative;
+- time of maximum estimated growth rate;
+- maximum fitted response inside support;
+- time of maximum fitted response;
+- number and approximate locations of second-derivative sign changes.
+
+# 20. Approximate inflection times
+
+For a flexible curve, there may be more than one point where curvature changes sign. The package therefore reports all detected sign-change intervals on the evaluation grid rather than forcing a single sigmoid inflection.
+
+# 21. Resolution dependence
+
+A denser evaluation grid gives finer numerical localization of sign changes. It does not create more information in the original data. Report the original observation schedule.
+
+# 22. Maximum rate
+
+```{r}
+tr <- growth_smooth_traits(s_groups)
+tr[, c("group", "maximum_growth_rate", "time_maximum_growth_rate")]
+```
+
+The maximum derivative is descriptive and conditional on the smoothing method. Later uncertainty modules should propagate smoothing and sampling uncertainty.
+
+# 23. Peak response
+
+A fitted maximum at the right boundary means the observed series may still be increasing. It should not automatically be called a biological plateau.
+
+# 24. Irregular times
+
+```{r}
+s_irr <- growth_smooth(
+  irr,
+  time = "day",
+  response = "height_cm",
+  group = "water_regime",
+  method = "loess"
+)
+```
+
+LOESS and smoothing splines can use irregular time directly. Do not first coerce the data to an artificial regular grid unless the reconstruction method is explicit.
+
+# 25. Derivatives on irregular time
+
+```{r}
+growth_derivative(s_irr, order = 1, n = 100)
+```
+
+The derivative is evaluated on a user-defined dense grid inside the observed support, but the original irregular observations remain the information source.
+
+# 26. Relative growth rate from a smooth biomass curve
+
+Suppose `fit` is a positive biomass smooth. A simple calculation is:
+
+```{r eval=FALSE}
+p <- growth_smooth_predict(fit, n=200)
+d <- growth_derivative(fit, order=1, time=p$time)
+rgr <- d$derivative / p$fit
+```
+
+Do not calculate this where fitted biomass is zero or negative.
+
+# 27. Log-scale alternative
+
+For strictly positive biomass, smoothing `log(W)` and differentiating can estimate instantaneous RGR directly. That changes the error and smoothing scale, so it should be planned rather than used as an automatic transformation.
+
+# 28. Monotonic growth constraints
+
+Unconstrained smoothers can produce small declines caused by noise. When scientific knowledge requires monotonic increase over a specific phase, shape constraints can be more appropriate than manually deleting observations.
+
+# 29. SCAM
+
+Shape-constrained additive models can constrain the sign of derivatives while retaining smoothness [@PyaWood2015]. The package uses `scam` only as an optional engine.
+
+```{r}
+if (requireNamespace("scam", quietly = TRUE) && requireNamespace("mgcv", quietly = TRUE)) {
+  s_inc <- growth_smooth(
+    bean,
+    time = "day",
+    response = "height_cm",
+    method = "scam",
+    constraint = "increasing",
+    k = 6
+  )
+}
+```
+
+# 30. Increasing SCAM basis
+
+The implementation uses the `mpi` shape-constrained basis for monotonic increase. This should be applied only over a phase where monotonic increase is biologically defensible.
+
+# 31. Decreasing trajectories
+
+For senescence or decline phases:
+
+```{r eval=FALSE}
+s_dec <- growth_smooth(
+  senescence_data,
+  time = "day",
+  response = "green_area",
+  method = "scam",
+  constraint = "decreasing"
+)
+```
+
+# 32. Why monotonicity can be wrong
+
+Whole-season plant traits can rise and then fall. Constraining such a complete trajectory to increase forces a false biological shape. Consider phase-specific analysis, an unconstrained smooth, or a multiphasic model.
+
+# 33. SCAM AR(1)
+
+The Gaussian SCAM engine accepts `rho` for residual AR(1). In the 0.3.0 wrapper this is an advanced option, not automatically estimated.
+
+```{r eval=FALSE}
+s_inc_ar <- growth_smooth(
+  bean,
+  time="day",
+  response="height_cm",
+  method="scam",
+  constraint="increasing",
+  rho=.4
+)
+```
+
+Use only with a meaningful equally ordered residual sequence.
+
+# 34. Why `rho` is not estimated automatically here
+
+A wrapper that guesses a correlation from the same residuals and then presents it as a fitted truth would conceal an important modeling decision. The mixed layer provides a more explicit covariance workflow.
+
+# 35. Smooth method comparison
+
+A practical sensitivity analysis is:
+
+```{r eval=FALSE}
+ss <- growth_smooth(bean, time="day", response="height_cm", method="smooth_spline")
+sl <- growth_smooth(bean, time="day", response="height_cm", method="loess", span=.75)
+sg <- growth_smooth(bean, time="day", response="height_cm", method="gam", k=6)
+
+rbind(
+  smooth_spline = growth_smooth_traits(ss),
+  loess = growth_smooth_traits(sl),
+  gam = growth_smooth_traits(sg)
+)
+```
+
+Landmarks that agree across defensible smoothing strategies are more persuasive than those that depend on one narrow tuning choice.
+
+# 36. Smoothing is not interpolation
+
+A smoother estimates a systematic trajectory under assumptions about roughness or local structure. It should not be presented as exact reconstruction of the biological path between observations.
+
+# 37. Smoothing is not a mechanistic model
+
+A smooth derivative can describe when growth accelerates. It does not identify the physiological mechanism responsible for that acceleration.
+
+# 38. Outliers
+
+LOESS and splines can be affected by outliers. Investigate measurement error and biological events before deciding whether any observation should be removed. Do not delete points merely to make the derivative smoother.
+
+# 39. Discontinuities
+
+Defoliation, pruning, harvest, lodging, and breakage can create genuine discontinuities. A globally smooth function may be inappropriate. The Anten and Ackerly iterative framework illustrates why periodic biomass loss requires explicit treatment [@AntenAckerly2001].
+
+# 40. Uneven uncertainty
+
+Data density near the center of the time range is often greater than near boundaries. Derivative uncertainty is therefore not uniform. Version 0.3.0 returns point estimates; formal bootstrap and Bayesian uncertainty will be added later.
+
+# 41. No automatic p-values for derivative sign
+
+The package does not declare a growth period significant merely because the estimated derivative is positive. Inference on derivatives requires uncertainty bands and multiplicity-aware interpretation.
+
+# 42. Visual display of observed units
+
+Always show observed points or unit trajectories alongside the smooth. A line without data can conceal sparsity.
+
+# 43. Recommended figure layers
+
+A publication figure can contain:
+
+1. observed persistent-unit summaries or faint individual trajectories;
+2. fitted mean smooth;
+3. uncertainty band when available;
+4. vertical markers for biologically defined events;
+5. a separate derivative panel rather than a second incompatible y-axis.
+
+# 44. A derivative panel
+
+```{r eval=FALSE}
+p <- growth_smooth_predict(s_h, n=150)
+d <- growth_derivative(s_h, order=1, time=p$time)
+```
+
+Plot `p` and `d` separately. Do not combine centimeters and centimeters per day on one unlabeled axis.
+
+# 45. Method choice by scientific question
+
+Use a smoothing spline when a global smoothness penalty and derivative estimation are attractive. Use LOESS when local polynomial behavior is useful and data density is sufficient. Use GAM when a richer additive model and penalized-basis framework are needed. Use SCAM when a defensible shape constraint matters.
+
+# 46. What not to choose by p-value
+
+A smoothing method is not a hypothesis competing for the smallest p-value. Compare curve plausibility, predictive behavior, sensitivity, residual patterns, and landmark stability.
+
+# 47. Known-truth linear derivative check
+
+The package test suite creates data with
+
+$$
+y(t)=3+2t.
+$$
+
+The fitted smoothing-spline first derivative should recover approximately 2 over the interior, and the second derivative should be approximately zero.
+
+# 48. Why known-truth tests matter
+
+Derivative code can produce visually plausible but numerically wrong output. Analytical controls detect errors that screenshots cannot.
+
+# 49. Units
+
+If height is cm and time is days, the first derivative is cm day$^{-1}$ and the second derivative is cm day$^{-2}$. Always propagate units in interpretation.
+
+# 50. Scaling time
+
+Changing days to weeks changes derivative magnitude. It does not merely relabel the x-axis.
+
+# 51. Scaling response
+
+Changing grams to milligrams scales absolute derivatives but leaves appropriately defined relative rates unchanged.
+
+# 52. Methods reporting template
+
+> Population growth trajectories were estimated from persistent-unit summaries using a smoothing spline. The smoothing parameter was selected by cross-validation. First and second derivatives were evaluated within the observed temporal support to identify periods of maximum absolute growth and changes in curvature. Landmark sensitivity was assessed against an alternative LOESS specification. No extrapolated derivative was interpreted biologically.
+
+# 53. Results reporting template
+
+> The estimated growth rate increased through the early observation period, reached a maximum during canopy expansion, and subsequently declined. The timing of maximum rate was similar under smoothing-spline and LOESS specifications, whereas boundary curvature was method sensitive and was not interpreted as a distinct developmental transition.
+
+# 54. What version 0.3.0 does not provide
+
+It does not yet provide simultaneous confidence bands for derivatives, bootstrap smoothing-parameter uncertainty, Bayesian smooths, automatic changepoint inference, or event-aware discontinuous trajectories.
+
+# 55. Compact script
+
+```{r eval=FALSE}
+d <- growth_example_data("bean_repeated")
+
+s <- growth_smooth(
+  d,
+  time = "day",
+  response = "projected_leaf_area_m2",
+  group = "water_regime",
+  method = "smooth_spline",
+  cv = TRUE
+)
+
+pred <- growth_smooth_predict(s, n = 200)
+rate <- growth_derivative(s, order = 1, time = pred$time)
+acc  <- growth_acceleration(s, time = pred$time)
+land <- growth_smooth_traits(s, n = 400)
+```
+
+# 56. Final perspective
+
+Flexible smoothing provides a bridge between classical growth analysis and modern high-frequency phenotyping. Its greatest strength is not freedom from assumptions. Its strength is that the assumptions shift from one fixed biological equation to transparent smoothness and shape assumptions that can be diagnosed and compared.
+
+# References

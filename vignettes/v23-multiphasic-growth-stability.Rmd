@@ -1,0 +1,552 @@
+---
+title: "Multiphase Plant Growth, Inflection, Stability, and Changepoints"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Multiphase Plant Growth, Inflection, Stability, and Changepoints}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.5)
+```
+
+# Learning goals
+
+This vignette develops a complete workflow for plant trajectories that contain more than one biologically meaningful growth phase. The central distinction is between a curve that is mathematically flexible and a curve whose phases can be defended biologically. A second sigmoid may represent renewed vegetative growth, secondary stem expansion, a reproductive sink, recovery after stress, or a measurement artifact. The model alone cannot decide among these explanations.
+
+After completing the vignette, you should be able to:
+
+1. recognize when a monophasic sigmoid is likely to be inadequate;
+2. fit one, two, or three ordered logistic components with `growth_multiphase()`;
+3. use `growth_diphasic()` as a readable two-phase wrapper;
+4. distinguish component centers from critical points of the complete summed trajectory;
+5. locate stability points numerically with `growth_stability()`;
+6. use `growth_changepoint()` as an exploratory piecewise-linear diagnostic;
+7. document extrapolation, initialization, phase ordering, and biological interpretation.
+
+# Why multiphase growth needs special care
+
+A sum of logistic components can represent a trajectory with several periods of rapid increase. However, the critical points of the sum are not obtained by simply listing the critical points of each component. Mischan et al. showed this explicitly for diphasic logistic growth: the inflection and stability points of the complete sum can differ from those of its individual functions [@MischanEtAl2015]. This is why `agriGrowthFlow` keeps the phase parameters and the complete-curve critical points as separate outputs.
+
+A convenient two-phase model is
+
+$$
+y(t)=\frac{A_1}{1+\exp[-(t-m_1)/s_1]}+\frac{A_2}{1+\exp[-(t-m_2)/s_2]},
+$$
+
+with $A_j>0$, $s_j>0$, and $m_1<m_2$. The ordering constraint is important because otherwise exchanging phase labels produces the same fitted sum. Version 0.5.0 uses an internal transformed parameterization so that amplitudes and scales remain positive and phase centers remain ordered.
+
+# Teaching data
+
+The `coffee_diphasic` dataset is simulated. It contains repeated biomass measurements for two treatment groups and is intended only for teaching, examples, and testing.
+
+```{r}
+library(agriGrowthFlow)
+coffee <- growth_example_data("coffee_diphasic")
+str(coffee)
+head(coffee)
+```
+
+The raw data should always be visualized before fitting phases.
+
+```{r, eval=FALSE}
+library(ggplot2)
+ggplot(coffee, aes(day, biomass_g, group = plant_id, colour = treatment)) +
+  geom_line(alpha = 0.35) +
+  geom_point(size = 1.2) +
+  theme_bw()
+```
+
+# First analysis: one group, two phases
+
+```{r, eval=FALSE}
+control <- subset(coffee, treatment == "control")
+fit2 <- growth_diphasic(
+  control,
+  time = "day",
+  response = "biomass_g",
+  n_start = 30,
+  seed = 20260827
+)
+fit2
+fit2$components
+fit2$attempts
+```
+
+The component table contains one amplitude, center, and scale for each logistic phase. These are descriptive parameters of the decomposition. They should not automatically be translated into phenological stages without independent biological information.
+
+# Multistart is not optional decoration
+
+Multiphase nonlinear models often contain local minima and weakly identified parameter combinations. `growth_multiphase()` therefore records every optimization attempt. The best finite residual sum of squares is retained, but the attempt table remains available for inspection.
+
+A useful review sequence is:
+
+```{r, eval=FALSE}
+with(fit2$attempts, table(converged))
+summary(fit2$attempts$rss[is.finite(fit2$attempts$rss)])
+head(fit2$attempts[order(fit2$attempts$rss), ], 10)
+```
+
+A model with one isolated low-RSS solution and many failed or very different solutions deserves more scrutiny than a model whose best region is repeatedly rediscovered.
+
+# Group-specific descriptive trajectories
+
+```{r, eval=FALSE}
+by_trt <- growth_diphasic(
+  coffee,
+  time = "day",
+  response = "biomass_g",
+  group = "treatment",
+  n_start = 20,
+  seed = 101
+)
+by_trt
+```
+
+Separate curves are useful for description, but they do not by themselves provide a treatment test that respects repeated-unit covariance. When inferential treatment comparison is the primary aim, the longitudinal and Bayesian layers introduced in versions 0.3.0 and 0.4.0 remain relevant.
+
+# Stability points of the complete curve
+
+Mischan et al. define stability points through zeros of the fourth derivative for logistic growth [@MischanEtAl2015]. Version 0.5.0 follows that mathematical idea numerically.
+
+```{r, eval=FALSE}
+growth_stability(fit2)
+growth_stability(fit2, n = 4001)
+```
+
+The numerical search is performed on the complete fitted sum. This is essential. For a multiphase curve, the fourth derivative of the sum is the sum of the component fourth derivatives, and its zeros do not generally coincide with the separate component zeros.
+
+# Inflection logic
+
+For a single logistic, the inflection point is available analytically. For a summed curve, the second derivative of the complete trajectory should be inspected. In version 0.5.0, `growth_stability()` is exported for fourth-derivative points, while second-derivative investigation can be performed with the numerical helpers exposed through the higher-level smooth and derivative workflow.
+
+A practical graph should display:
+
+1. observed values;
+2. fitted total curve;
+3. individual component curves only if they aid interpretation;
+4. candidate inflection or stability times;
+5. the observed time support.
+
+Never display critical points far outside the observed support without an explicit extrapolation warning.
+
+# Changepoints answer a different question
+
+`growth_changepoint()` fits a continuous two-slope linear model:
+
+$$
+y_i=\beta_0+\beta_1 t_i+\beta_2\max(t_i-c,0)+\varepsilon_i,
+$$
+
+where $c$ is searched over admissible observed times. This is related to segmented-regression thinking [@Muggeo2003], but the current implementation is deliberately simpler: it is a transparent one-breakpoint grid search, not a substitute for the full `segmented` package.
+
+```{r, eval=FALSE}
+cp <- growth_changepoint(
+  control,
+  time = "day",
+  response = "biomass_g",
+  min_segment = 3
+)
+cp
+cp$candidates[order(cp$candidates$rss), ][1:8, ]
+```
+
+A changepoint in slope is not synonymous with an inflection point. An inflection concerns curvature of a smooth function. A piecewise-linear breakpoint concerns a change in linear slope. They may be close in some data sets and very different in others.
+
+# Comparing one, two, and three phases
+
+A sensible exploratory sequence is to fit increasing structural complexity while inspecting identifiability and biological plausibility.
+
+```{r, eval=FALSE}
+f1 <- growth_multiphase(control, time="day", response="biomass_g", n_phases=1, n_start=10, seed=1)
+f2 <- growth_multiphase(control, time="day", response="biomass_g", n_phases=2, n_start=20, seed=2)
+f3 <- growth_multiphase(control, time="day", response="biomass_g", n_phases=3, n_start=30, seed=3)
+
+c(one=f1$rss, two=f2$rss, three=f3$rss)
+```
+
+A lower RSS is expected when more parameters are added. It is therefore not sufficient evidence for another biological phase. Consider residual structure, parameter stability, predictive evaluation, phase separation, and subject-matter knowledge.
+
+# Experimental design considerations
+
+## Repeated non-destructive observations
+
+The same plant can contribute repeated measurements. Dependence within plant matters for uncertainty. A descriptive multiphase fit can summarize the average trajectory, but inferential treatment conclusions should not pretend those rows are independent replicates.
+
+## Destructive harvests
+
+If a different plant is harvested at each date, the persistent experimental unit may be the plot rather than the harvested plant. The design layer should aggregate subsamples within plot and date before a plot-level trajectory is interpreted. This principle is consistent with the experimental-unit logic emphasized by Keuls and Garretsen in plant growth-curve analysis.
+
+## Sparse timing
+
+Multiple phases require temporal information between the phases. A data set with a few widely separated harvests may support a flexible numerical fit without supporting a credible biological decomposition.
+
+# Reporting checklist
+
+A Methods section should report:
+
+- experimental unit and sampling process;
+- response and time units;
+- number and placement of observation times;
+- number of phases considered;
+- ordering and positivity constraints;
+- number of starting values or multistart attempts;
+- criterion used to choose the retained numerical solution;
+- search interval used for critical points;
+- whether critical points were inside the observed support.
+
+A Results section should report the total trajectory before discussing components. If a treatment shifts the second phase, state whether the evidence is descriptive or inferential.
+
+# Common errors
+
+1. Treating a component midpoint as an automatically proven developmental transition.
+2. Reading the critical points of each logistic component as the critical points of their sum.
+3. Adding phases until residuals nearly vanish.
+4. Ignoring repeated-unit dependence.
+5. Reporting an extrapolated plateau without showing the observed support.
+6. Describing a changepoint and an inflection as the same mathematical object.
+7. Hiding failed nonlinear optimization attempts.
+
+# Worked interpretation
+
+Suppose the control group has an early component centered near 30 days and a second component near 90 days. The scientifically cautious interpretation is that the fitted mean trajectory is compatible with two periods of relatively rapid biomass accumulation. A stronger claim, such as assigning the second component to a reproductive stage, requires phenological observations or other biological evidence.
+
+If a stress treatment delays the second center and reduces its amplitude, the curve suggests delayed and reduced late accumulation. The treatment effect should then be tested with a design-aware inferential model if the goal is population inference.
+
+# Practice tasks
+
+## Practice task 1
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 1: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=101)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 2
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 2: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=102)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 3
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 3: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=103)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 4
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 4: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=104)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 5
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 5: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=105)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 6
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 6: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=106)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 7
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 7: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=107)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 8
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 8: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=108)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 9
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 9: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=109)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 10
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 10: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=110)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 11
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 11: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=111)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 12
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 12: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=112)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 13
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 13: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=113)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 14
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 14: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=114)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 15
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 15: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=115)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 16
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 16: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=116)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 17
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 17: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=117)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 18
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 18: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=118)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 19
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 19: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=119)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 20
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 20: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=120)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 21
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 21: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=121)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 22
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 22: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=122)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 23
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 23: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=123)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 24
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 24: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=124)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 25
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 25: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=125)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 26
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 26: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=126)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 27
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 27: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=127)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 28
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 28: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=128)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 29
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 29: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=129)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+## Practice task 30
+
+Use a resampled or treatment-specific subset of `coffee_diphasic`. Fit one and two phases, inspect the optimization attempts, record the fitted phase centers, and state whether both centers lie within the observed time support. Then calculate `growth_stability()` and explain why the stability times are properties of the complete curve rather than labels attached to individual components.
+
+```{r, eval=FALSE}
+# Practice 30: change the seed or subset before running.
+fit_practice <- growth_diphasic(control, time="day", response="biomass_g", n_start=5, seed=130)
+fit_practice$components
+growth_stability(fit_practice, n=1001)
+```
+
+# References
+
+Key methodological references include @MischanEtAl2015, @Muggeo2003, and @Panik2014.

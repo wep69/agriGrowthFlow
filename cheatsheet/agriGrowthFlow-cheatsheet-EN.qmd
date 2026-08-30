@@ -1,0 +1,195 @@
+---
+title: "agriGrowthFlow 1.0.0: Cheatsheet EN"
+subtitle: "Auditable workflow for plant growth analysis with persistent experimental unit"
+author: "Walter E. Pereira and Magali H. Pereira Martinez"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    theme: cosmo
+execute:
+  freeze: auto
+  warning: false
+  message: false
+bibliography: ../vignettes/references.bib
+---
+
+::: {.callout-note}
+## Key concept
+
+Declare the persistent experimental unit and sampling mechanism before fitting or interpreting any growth trajectory.
+:::
+
+# Domain question
+
+How to compare treatments when measurements are repeated on the same plant or when harvests are destructive across different plots?
+
+# Teaching data
+
+All data are simulated and frozen for software testing, not field evidence.
+
+```{r}
+library(agriGrowthFlow)
+maize <- growth_example_data("maize_destructive")
+bean <- growth_example_data("bean_repeated")
+sun <- growth_example_data("sunflower_sigmoid")
+dim(maize); dim(bean); dim(sun)
+```
+
+# Workflow 1: qualitative factor with block
+
+```{r}
+gmaize <- growth_data(
+  maize, time="day", sampling="destructive",
+  experimental_unit="plot_id", treatment="nitrogen", block="block",
+  total_mass="total_mass_g", leaf_area="leaf_area_m2"
+)
+growth_validate(gmaize)
+growth_plan(gmaize)
+
+cf <- growth_curve_coefficients(maize, time="day", response="total_mass_g",
+  unit="plot_id", group="nitrogen", degree=2)
+head(cf)
+
+mv <- growth_manova(maize, time="day", response="total_mass_g",
+  unit="plot_id", group="nitrogen", degree=2)
+mv$multivariate
+```
+
+::: {.callout-tip}
+## Study tip
+
+Grouping letters are computed within each stratum; incomplete families are refused.
+:::
+
+# Workflow 2: quantitative factor with nonlinear regression
+
+```{r}
+one <- subset(sun, cultivar == unique(sun$cultivar)[1])
+fit <- growth_fit(one, "logistic", time="day", response="biomass_g", n_start=5, seed=20260827)
+fit
+growth_traits(fit)
+growth_predict(fit, time=seq(10,70,10), interval="confidence")
+growth_diagnose(fit)
+```
+
+# Workflow 3:Quali + quanti (mixture)
+
+```{r}
+fit_set <- growth_fit(one, c("logistic","gompertz"), time="day", response="biomass_g",
+  n_start=5, seed=20260827)
+fit_set
+growth_compare(fit_set)
+```
+
+# Workflow 4: model comparison with fit-quality table
+
+```{r}
+comp <- growth_compare(fit_set)
+comp[, c("model","n","rmse","aic","aicc","delta_aicc","akaike_weight")]
+
+# Grouped example: one fit per cultivar
+fit_grp <- growth_fit(sun, "logistic", time="day", response="biomass_g",
+  group="cultivar", n_start=3, seed=20260827)
+fit_grp
+```
+
+::: {.callout-warning}
+## Common mistake
+
+Model comparison is valid only for identical prepared observations. The package refuses comparisons with different keys.
+:::
+
+# Longitudinal and flexible
+
+```{r}
+if (requireNamespace("nlme", quietly=TRUE)) {
+  gbean <- growth_data(bean, time="day", sampling="repeated",
+    experimental_unit="plant_id", treatment="water_regime", block="block",
+    leaf_area="projected_leaf_area_m2")
+  m <- growth_mixed(gbean, response="height_cm", degree=2, random_degree=1)
+  print(m)
+}
+
+s <- growth_smooth(bean, time="day", response="height_cm", method="smooth_spline")
+growth_smooth_predict(s, n=30)
+growth_derivative(s, order=1, n=30)
+```
+
+# Bootstrap uncertainty
+
+```{r}
+one <- subset(sun, cultivar == unique(sun$cultivar)[1])
+fit2 <- growth_fit(one, "logistic", time="day", response="biomass_g", n_start=3, seed=1)
+b <- growth_boot(fit2, R=200, seed=20260827)
+growth_boot_ci(b, source="coefficients")
+```
+
+::: {.callout-important}
+## Critical information
+
+Bootstrap must preserve the experimental hierarchy. `cluster` methods resample complete trajectories.
+:::
+
+# Consolidated workflow 1.0.0
+
+```{r}
+sun <- growth_example_data("sunflower_sigmoid")
+plan <- growth_workflow(sun, time="day", response="biomass_g",
+  strategy="parametric", models=c("logistic","gompertz"), n_start=5, seed=20260827)
+growth_workflow_audit(plan)
+growth_table(plan, "traits")
+td <- tempfile("bundle_")
+growth_export(plan, td, format="bundle")
+list.files(td)
+```
+
+# Diagram
+
+```{mermaid}
+flowchart TD
+  A[Declare persistent unit] --> B[Validate sampling]
+  B --> C[Classical indices]
+  C --> D{Parametric fit?}
+  D -->|yes| E[Multi-start + diagnostics]
+  D -->|no| F[Smooth / FPCA / MANOVA]
+  E --> G[Biological traits]
+  F --> G
+  G --> H[Bootstrap / Bayes opt]
+  H --> I[Audit + bundle]
+```
+
+# Best practices
+
+- Do not treat destructive subsamples as longitudinal individuals.
+- Diagnose covariance, heterogeneity and support before claims.
+- Report conditional economic assumptions in `growth_harvest_opt()`.
+
+# Exercises
+
+::: {.callout-caution collapse="true"}
+## Solutions
+
+1. Redo workflow 2 with `n_start=10` and compare R².
+2. Switch `growth_smooth` method to `loess` span 0.75 and evaluate derivative.
+:::
+
+# How to cite
+
+```{r}
+citation("agriGrowthFlow")
+packageVersion("agriGrowthFlow")
+R.version.string
+```
+
+```{r}
+# dynamic numbers
+fit <- growth_fit(subset(sun, cultivar==unique(sun$cultivar)[1]), "logistic", time="day", response="biomass_g", n_start=3, seed=1)
+tr <- growth_traits(fit)
+cat("Maximum rate:", round(tr$maximum_absolute_rate,2), "at", round(tr$time_maximum_rate,1), "days\n")
+```

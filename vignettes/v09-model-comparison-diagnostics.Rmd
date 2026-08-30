@@ -1,0 +1,343 @@
+---
+title: "Model Comparison, Diagnostics, and Prediction"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+bibliography: references.bib
+link-citations: true
+vignette: >
+  %\VignetteIndexEntry{Model Comparison, Diagnostics, and Prediction}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", warning = FALSE, message = FALSE)
+library(agriGrowthFlow)
+```
+
+# Purpose
+
+A nonlinear curve should be evaluated as a scientific model, not only as a smooth line through observations. Version 0.2.0 therefore separates three tasks:
+
+1. model comparison on identical observations;
+2. diagnostics of a selected fit;
+3. prediction with clearly labeled local interval approximations.
+
+# Build a candidate set
+
+```{r}
+d <- growth_example_data("sunflower_sigmoid")
+d <- subset(d, cultivar == unique(d$cultivar)[1])
+cs <- growth_fit(
+  d,
+  c("logistic", "gompertz"),
+  time = "day",
+  response = "biomass_g",
+  n_start = 8,
+  seed = 1701
+)
+cs
+```
+
+# Same-observation rule
+
+Information criteria are only comparable when models describe the same response observations under the same likelihood basis.
+
+```{r}
+cmp <- growth_compare(cs)
+cmp
+```
+
+The table includes:
+
+- residual sum of squares;
+- RMSE;
+- MAE;
+- AIC;
+- corrected AIC;
+- BIC;
+- delta AICc;
+- Akaike weight.
+
+The package refuses comparison if prepared observation keys differ.
+
+```{r eval=FALSE}
+a <- growth_fit(subset(d, day <= 49), "logistic", time = "day", response = "biomass_g")
+b <- growth_fit(d, "gompertz", time = "day", response = "biomass_g")
+growth_compare(a, b)
+```
+
+That refusal prevents an apparently precise but invalid ranking.
+
+# AICc is not the only scientific criterion
+
+A smaller AICc indicates better estimated information trade-off within the candidate set. It does not prove that the biological mechanism is correct.
+
+After ranking models, compare derived traits.
+
+```{r}
+growth_traits(cs)
+```
+
+If two models have similar AICc but imply substantially different t90 values, the late-growth conclusion is model-dependent and should be reported as such.
+
+# Small-sample AICc
+
+AICc requires enough observations relative to the likelihood parameter count. When that condition fails, the package returns `NA` for AICc rather than manufacturing a value.
+
+Akaike weights are calculated only from finite AICc values.
+
+# Diagnose the fitted curve
+
+```{r}
+f <- cs$fits$logistic
+dg <- growth_diagnose(f)
+dg
+```
+
+# Residual magnitude
+
+```{r}
+dg$summary[, c("rmse", "mae", "mean_residual", "descriptive_r_squared")]
+```
+
+The reported R-squared is descriptive. It should not be used as the primary criterion for choosing among nonlinear equations.
+
+# Residual records
+
+```{r}
+head(dg$residuals)
+```
+
+These records preserve prepared time and experimental-unit identifiers so users can create residual-versus-time, residual-versus-fitted, and unit-specific diagnostic graphics.
+
+# Unit-aware lag diagnostics
+
+Serial plant-growth observations can be correlated within plots or plants. Ordinary NLS in 0.2.0 does not model that covariance.
+
+The package nevertheless computes descriptive lag summaries without joining unrelated units.
+
+```{r}
+dg$summary[, c(
+  "lag1_residual_correlation",
+  "durbin_watson_descriptive",
+  "lag_pairs",
+  "lag_diagnostics_scope"
+)]
+```
+
+These quantities are warnings and descriptive clues. They are not a correction for serial dependence.
+
+# Parameter boundaries
+
+```{r}
+dg$boundaries
+```
+
+A coefficient close to its hard bound can indicate:
+
+- insufficient time support;
+- confounding among nonlinear parameters;
+- an inappropriate model form;
+- a start/bound specification that needs scientific reconsideration.
+
+Do not silently widen a bound and continue until a desired number appears.
+
+# Covariance conditioning
+
+```{r}
+dg$summary$covariance_condition_number
+```
+
+A large condition number suggests that the local covariance matrix contains strongly coupled parameter directions. Flexible shape parameters often increase this risk.
+
+# Multistart audit
+
+```{r}
+dg$attempts
+```
+
+Convergence should be described by the distribution of fitting attempts, not only by the best attempt.
+
+# Point prediction
+
+```{r}
+growth_predict(f)
+```
+
+By default, prediction uses the prepared observed time values.
+
+# Regular prediction grid
+
+```{r}
+grid <- seq(min(f$data$.t), max(f$data$.t), length.out = 40)
+p0 <- growth_predict(f, time = grid)
+head(p0)
+```
+
+# Confidence interval for the mean curve
+
+```{r}
+pc <- growth_predict(
+  f,
+  time = grid,
+  interval = "confidence",
+  level = 0.95
+)
+head(pc)
+```
+
+The interval propagates the local coefficient covariance through the nonlinear mean function with a numerical gradient.
+
+The numerical gradient respects hard parameter boundaries. If a central perturbation would leave the allowed parameter space, a one-sided finite difference is used.
+
+# Prediction interval for a new response
+
+```{r}
+pp <- growth_predict(
+  f,
+  time = grid,
+  interval = "prediction",
+  level = 0.95
+)
+head(pp)
+```
+
+The prediction interval adds residual variance to local mean-curve variance. It is therefore wider than the corresponding confidence interval under the fitted ordinary-NLS assumptions.
+
+# Interval limitations
+
+The 0.2.0 intervals are not:
+
+- bootstrap intervals;
+- Bayesian credible intervals;
+- nonlinear mixed-effects population intervals;
+- plot-specific random-effect intervals;
+- simultaneous confidence bands.
+
+Those capabilities are deferred to later package versions rather than being mislabeled.
+
+# Plot the model
+
+```{r}
+plot(f)
+```
+
+```{r}
+plot(f, interval = "prediction")
+```
+
+```{r}
+plot(f, interval = "none")
+```
+
+The plot is intended for inspection. Publication figures should state what interval is shown and should retain observed data wherever possible.
+
+# Diagnostics and destructive sampling
+
+The sunflower teaching dataset contains two destructive subsamples per plot and harvest. When declared through `growth_data()` with `sampling = "destructive"`, the automatic fitting preparation averages the two subsamples within persistent plot and time.
+
+```{r}
+sun <- growth_example_data("sunflower_sigmoid")
+s1 <- subset(sun, cultivar == unique(sun$cultivar)[1])
+g <- growth_data(
+  s1,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  total_mass = "biomass_g"
+)
+f2 <- growth_fit(g, "logistic", n_start = 5, seed = 3)
+f2$aggregation
+nrow(s1)
+nrow(f2$data)
+```
+
+This does not turn harvested subsamples into repeated individuals. It preserves the persistent plot as the serial unit.
+
+# Diagnostics and repeated non-destructive sampling
+
+For repeated plant measurements, ordinary NLS also ignores within-plant dependence. Version 0.2.0 warns instead of silently treating those records as independent for inference.
+
+```{r eval=FALSE}
+bean <- growth_example_data("bean_repeated")
+gb <- growth_data(
+  bean,
+  time = "day",
+  sampling = "repeated",
+  experimental_unit = "plant_id",
+  plant = "plant_id",
+  treatment = "water_regime",
+  leaf_area = "projected_leaf_area_m2"
+)
+growth_fit(gb, "logistic", response = "projected_leaf_area_m2", group = "water_regime")
+```
+
+The correct treatment-inference layer for such data requires explicit random effects and covariance structure, which are deferred beyond 0.2.0.
+
+# Comparison workflow
+
+```{r}
+cs2 <- growth_fit(
+  d,
+  c("logistic", "gompertz"),
+  time = "day",
+  response = "biomass_g",
+  n_start = 10,
+  seed = 201
+)
+
+growth_compare(cs2)
+
+growth_diagnose(cs2$fits$logistic)
+growth_diagnose(cs2$fits$gompertz)
+
+growth_traits(cs2)
+```
+
+# Interpretation sequence
+
+A defensible interpretation can follow this order:
+
+1. confirm identical observations;
+2. inspect convergence across starts;
+3. inspect boundaries and covariance conditioning;
+4. inspect residual pattern over time and within unit;
+5. compare RSS, RMSE and MAE;
+6. compare AICc/BIC within the candidate set;
+7. compare derived biological traits;
+8. identify extrapolated traits;
+9. state that ordinary NLS does not represent serial experimental-unit covariance when relevant.
+
+# What not to do
+
+Do not compare models fitted after different missing-value deletion rules.
+
+Do not select a curve from AICc alone when its asymptote is biologically implausible.
+
+Do not call a local delta-method confidence interval a bootstrap interval.
+
+Do not interpret residual lag correlation as a fitted AR(1) coefficient.
+
+Do not use a descriptive R-squared as evidence that the experimental design has been represented correctly.
+
+# Reporting template
+
+A concise methods statement should identify:
+
+- equation family;
+- parameterization;
+- bounded fitting engine;
+- number of starts and seed;
+- aggregation before fitting;
+- model-comparison criteria;
+- diagnostic checks;
+- interval type;
+- derived traits;
+- longitudinal limitations.
+
+# Next vignette
+
+Continue with `v10-derived-growth-traits.Rmd` for model-independent biological summaries such as inflection, maximum rate, t10, t50, t90, and observed-support AUC.

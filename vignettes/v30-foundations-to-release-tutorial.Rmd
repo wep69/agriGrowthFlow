@@ -1,0 +1,1064 @@
+---
+title: "agriGrowthFlow 1.0.0: foundations-to-release integrated tutorial"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{agriGrowthFlow 1.0.0: foundations-to-release integrated tutorial}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.5)
+```
+
+
+# Introduction
+
+This tutorial is the integrated entry point for agriGrowthFlow 1.0.0. It connects the full package architecture from experimental design through classical growth analysis, nonlinear trajectories, longitudinal dependence, flexible derivatives, functional analysis, uncertainty, biological events, agronomic decision functions, and reproducible release reporting.
+
+The tutorial is intentionally longer than a function reference. Its purpose is to show how the modules relate and, equally important, when they should not be combined. Plant growth is not one statistical problem. The correct analysis depends on what was measured, which experimental unit persists through time, whether harvests are destructive, whether the scientific target is a physiological rate or a trajectory, and how uncertainty should be represented.
+
+The classical foundation follows the quantitative growth-analysis tradition summarized by Hunt [@Hunt1990]. Design-aware treatment of growth curves follows the experimental-unit emphasis of Keuls and Garretsen [@KeulsGarretsen1982]. Flexible derivatives build on spline and LOESS approaches discussed by Shipley and Hunt [@ShipleyHunt1996]. Parametric families include classical sigmoid formulations and crop-oriented growth functions [@Richards1959; @GoudriaanMonteith1990; @YinEtAl2003; @Panik2014]. Longitudinal and Bayesian layers rely on established mixed and Bayesian modeling frameworks [@PinheiroBates2000; @Buerkner2017].
+
+```{r}
+library(agriGrowthFlow)
+```
+
+# Part I. Start with the experiment
+
+## 1. The persistent experimental unit
+
+The persistent experimental unit is the smallest independently randomized unit that remains scientifically meaningful across the intended comparison. In a repeated plant-imaging experiment, this may be the plant. In serial destructive harvests, it is commonly a plot, pot, tray, or other unit from which different plants are sampled at different times.
+
+A destructive harvest changes the data structure fundamentally. A plant removed on day 20 cannot be measured again on day 30. Row order cannot create a repeated subject. For valid trajectory analysis, observations must be summarized or modeled in a way that respects the plot or other persistent unit [@KeulsGarretsen1982].
+
+## 2. Destructive teaching dataset
+
+```{r}
+maize <- growth_example_data("maize_destructive")
+str(maize)
+```
+
+Declare the roles explicitly.
+
+```{r}
+maize_g <- growth_data(
+  maize,
+  time = "day",
+  sampling = "destructive",
+  experimental_unit = "plot_id",
+  plot = "plot_id",
+  block = "block",
+  treatment = "nitrogen",
+  total_mass = "total_mass_g",
+  leaf_area = "leaf_area_m2",
+  leaf_mass = "leaf_mass_g",
+  root_mass = "root_mass_g",
+  stem_mass = "stem_mass_g",
+  reproductive_mass = "reproductive_mass_g",
+  ground_area = "ground_area_m2",
+  units = list(time="day", total_mass="g", leaf_area="m2", ground_area="m2")
+)
+maize_g
+```
+
+## 3. Validation
+
+```{r}
+val <- growth_validate(maize_g)
+val
+plan <- growth_plan(maize_g)
+plan
+```
+
+Validation is a guardrail, not a certificate that the experiment is perfect. It identifies detectable conflicts such as missing time roles, too few harvests, or declarations that are inconsistent with the sampling structure.
+
+## 4. Release method guide
+
+```{r}
+growth_method_guide(maize_g, objective="rates")
+growth_method_guide(maize_g, objective="trajectory")
+growth_method_guide(maize_g, objective="treatment_comparison")
+```
+
+The guide should be read as a shortlist. The scientific question remains the governing criterion.
+
+# Part II. Classical growth analysis
+
+## 5. Absolute and relative growth rates
+
+Absolute growth rate over an interval is the change in biomass divided by elapsed time. Relative growth rate expresses the logarithmic rate of change per unit existing biomass. These quantities answer physiological questions that are not replaced by fitting a sigmoid [@Hunt1990].
+
+```{r}
+growth_agr(10, 18, 5, 9)
+growth_rgr(10, 18, 5, 9)
+```
+
+## 6. Integrated classical workflow
+
+```{r}
+ci <- growth_indices(maize_g)
+ci
+head(ci$intervals)
+```
+
+For destructive data, the function works after reducing the declared persistent unit by harvest time. Inspect the aggregated table when the experimental design is complex.
+
+```{r}
+head(ci$aggregated)
+```
+
+## 7. Net assimilation rate
+
+Net assimilation rate relates biomass gain to leaf area over time. Its interpretation requires positive biomass and leaf area and a biologically reasonable interval.
+
+```{r}
+growth_nar(5, 9, 0.04, 0.08, 10, 20)
+```
+
+## 8. Leaf area and mass ratios
+
+```{r}
+growth_lar(0.08, 9)
+growth_sla(0.08, 3)
+growth_lmr(3, 9)
+```
+
+The identity `LAR = SLA * LMR` is useful as both a biological decomposition and a numerical consistency check.
+
+## 9. Crop-level measures
+
+```{r}
+growth_lai(0.8, 0.25)
+growth_cgr(50, 90, 20, 30, ground_area=0.25)
+growth_lad(c(2, 3.5), c(20, 30))
+```
+
+CGR and LAI require a defensible ground-area basis. Do not use arbitrary pot dimensions if the quantity does not represent the intended crop surface.
+
+# Part III. Biomass partitioning and allometry
+
+## 10. Partitioning
+
+```{r}
+soy <- growth_example_data("soybean_partition")
+part <- growth_partition(
+  soy,
+  total_mass="total_mass_g",
+  components=c("root_mass_g","stem_mass_g","leaf_mass_g","reproductive_mass_g")
+)
+head(part)
+```
+
+The package retains unallocated biomass rather than silently forcing fractions to sum to one. A nonzero remainder can reveal omitted organs, measurement mismatch, or incompatible mass definitions.
+
+## 11. Allometry
+
+```{r}
+soy$shoot_mass_g <- soy$stem_mass_g + soy$leaf_mass_g + soy$reproductive_mass_g
+allom <- growth_allometry(soy, x="root_mass_g", y="shoot_mass_g")
+allom
+```
+
+The current foundational allometry is directional log-log OLS. It does not claim equivalence to standardized major axis regression.
+
+# Part IV. Parametric growth curves
+
+## 12. Why fit a parametric curve?
+
+A parametric curve is useful when its parameters or derived landmarks have a biological interpretation and the observed time range contains enough information to estimate them. Panik summarizes a broad family of growth equations [@Panik2014], while Richards provides an influential flexible sigmoid formulation [@Richards1959].
+
+```{r}
+growth_models()
+```
+
+## 13. Starting values
+
+```{r}
+sun <- growth_example_data("sunflower_sigmoid")
+one <- subset(sun, cultivar == unique(sun$cultivar)[1])
+growth_start(one, "logistic", time="day", response="biomass_g")
+```
+
+Nonlinear estimation can be sensitive to initial values. Starting values are part of the numerical method and should be reproducible.
+
+## 14. Fit one curve
+
+```{r}
+fl <- growth_fit(one, "logistic", time="day", response="biomass_g", n_start=5, seed=1)
+fl
+```
+
+## 15. Fit candidate curves
+
+```{r}
+fs <- growth_fit(one, c("logistic","gompertz","richards"),
+  time="day", response="biomass_g", n_start=5, seed=1)
+fs
+growth_compare(fs)
+```
+
+Candidate comparison is one piece of evidence. Inspect residuals, parameter plausibility, convergence across starts, temporal support, and whether the biological shape is credible [@ArchontoulisMiguez2015].
+
+## 16. Diagnostics
+
+```{r}
+dg <- growth_diagnose(fs$fits$logistic)
+dg
+```
+
+A descriptive R-squared is not a sufficient goodness-of-fit diagnosis. Check residual patterns, parameter bounds, multistart stability, and serial dependence where applicable.
+
+## 17. Biological traits
+
+```{r}
+growth_traits(fs)
+```
+
+Traits standardize interpretation across model families. They include inflection time, inflection response, maximum absolute growth rate, timing landmarks, and AUC over observed support.
+
+# Part V. Expolinear and beta growth
+
+## 18. Expolinear growth
+
+The expolinear model was developed for crop growth that transitions from exponential to approximately linear canopy-level accumulation [@GoudriaanMonteith1990]. It does not have a finite asymptote. Therefore, finite-asymptote traits such as `t90` should not be manufactured.
+
+```{r}
+wheat <- growth_example_data("wheat_expolinear")
+fe <- growth_fit(wheat, "expolinear", time="day", response="biomass_g_m2")
+growth_traits(fe)
+```
+
+## 19. Beta growth
+
+The beta growth function provides a finite-duration representation with biologically meaningful timing [@YinEtAl2003]. The package implementation follows the published correction to the exponent [@YinEtAl2003Erratum].
+
+# Part VI. Longitudinal mixed-effects analysis
+
+## 20. Repeated plant measurements
+
+```{r}
+bean <- growth_example_data("bean_repeated")
+bean_g <- growth_data(
+  bean,
+  time="day",
+  sampling="repeated",
+  experimental_unit="plant_id",
+  plant="plant_id",
+  treatment="water_regime",
+  block="block",
+  leaf_area="projected_leaf_area_m2"
+)
+```
+
+## 21. Mixed model concept
+
+A mixed growth curve can represent population-level change, treatment effects, unit-specific deviations, and residual correlation [@PinheiroBates2000; @Mirman2014].
+
+```{r eval=FALSE}
+m <- growth_mixed(
+  bean_g,
+  response="height_cm",
+  degree=2,
+  random_degree=1,
+  correlation="car1",
+  variance="group"
+)
+m
+growth_mixed_diagnose(m)
+```
+
+Continuous-time AR(1) is useful when observation intervals are irregular. It is not interchangeable with discrete AR(1) when time spacing varies.
+
+# Part VII. Flexible trajectories and derivatives
+
+## 22. Smoothing spline
+
+```{r}
+ss <- growth_smooth(bean, time="day", response="projected_leaf_area_m2",
+  unit="plant_id", group="water_regime", method="smooth_spline")
+growth_smooth_predict(ss, n=50)
+```
+
+## 23. First derivative
+
+```{r}
+growth_derivative(ss, order=1)
+```
+
+The first derivative estimates absolute change along the fitted smooth. Derivatives can be more sensitive than the trajectory itself to the smoothing choice [@ShipleyHunt1996].
+
+## 24. Second derivative
+
+```{r}
+growth_acceleration(ss)
+```
+
+The second derivative can identify changes in curvature, but such mathematical landmarks need biological interpretation.
+
+## 25. Shape constraints
+
+When monotonicity is scientifically justified, shape-constrained additive models can encode it explicitly [@PyaWood2015]. Do not impose monotonicity on traits that can decline through stress or senescence.
+
+```{r eval=FALSE}
+sc <- growth_smooth(bean, time="day", response="height_cm", unit="plant_id",
+  group="water_regime", method="scam", constraint="increasing")
+```
+
+# Part VIII. Functional data analysis
+
+## 26. Whole trajectories as observations
+
+Functional data analysis treats each plant trajectory as a function rather than a collection of independent time points [@RamsaySilverman2005; @WangChiouMuller2016].
+
+```{r}
+fp <- growth_fpca(bean, time="day", response="height_cm",
+  unit="plant_id", group="water_regime", engine="grid")
+head(fp$scores_table)
+```
+
+## 27. Interpret FPCA carefully
+
+An FPCA score summarizes how a trajectory differs from the mean function along an eigenfunction. It is not automatically a growth-rate parameter. Inspect the eigenfunctions and reconstructed trajectories before assigning biological labels.
+
+# Part IX. Multivariate growth components
+
+## 28. Orthogonal polynomial components
+
+```{r}
+cc <- growth_curve_coefficients(maize, time="day", response="total_mass_g",
+  unit="plot_id", group="nitrogen", degree=2)
+head(cc)
+```
+
+## 29. MANOVA
+
+```{r}
+growth_manova(maize, time="day", response="total_mass_g",
+  unit="plot_id", group="nitrogen", degree=2, test="Pillai")
+```
+
+The common observed time grid is a requirement. Missing times are not silently interpolated for this analysis.
+
+# Part X. Bootstrap uncertainty
+
+## 30. Why design-aware resampling matters
+
+Bootstrap uncertainty should resample at a level consistent with the design [@DavisonHinkley1997]. Repeated observations from one plant are not independent bootstrap units when the plant is the persistent experimental unit.
+
+```{r eval=FALSE}
+b <- growth_boot(fl, R=999, method="case", seed=2)
+growth_boot_ci(b)
+growth_boot_traits(b)
+```
+
+## 31. Selection stability
+
+```{r eval=FALSE}
+growth_selection_stability(one, models=c("logistic","gompertz","richards"),
+  time="day", response="biomass_g", R=200, seed=3)
+```
+
+Selection stability asks how often candidate ranking changes across resamples. It is separate from coefficient uncertainty within a chosen family.
+
+# Part XI. Bayesian nonlinear growth
+
+## 32. Prior templates
+
+```{r}
+growth_prior(one, "logistic", time="day", response="biomass_g")
+```
+
+Data-scaled priors are starting templates, not biological prior knowledge. Replace them when defensible prior information exists and inspect prior predictive behavior before posterior interpretation [@Buerkner2017].
+
+## 33. Posterior fitting
+
+```{r eval=FALSE}
+bfit <- growth_bayes(one, "logistic", time="day", response="biomass_g",
+  chains=4, iter=2000, warmup=1000, seed=4)
+growth_bayes_diagnose(bfit)
+growth_pp_check(bfit)
+growth_posterior_traits(bfit)
+```
+
+## 34. MCMC diagnostics
+
+Rank-normalized R-hat, bulk ESS, tail ESS, and divergences should be considered together [@VehtariEtAl2021]. Passing one threshold does not guarantee that the posterior geometry is easy or that the model is scientifically appropriate.
+
+## 35. Predictive comparison
+
+```{r eval=FALSE}
+# After fitting comparable Bayesian candidate models:
+# growth_loo(bfit)
+# growth_model_average(list(logistic=b1, gompertz=b2), method="stacking")
+```
+
+PSIS-LOO retains Pareto-k diagnostics [@VehtariGelmanGabry2017]. Stacking weights optimize predictive combination and are not probabilities that a biological model is true [@YaoEtAl2018].
+
+# Part XII. Multiphase growth
+
+## 36. Diphasic data
+
+```{r}
+coffee <- growth_example_data("coffee_diphasic")
+```
+
+## 37. Ordered phases
+
+```{r eval=FALSE}
+dp <- growth_diphasic(coffee, time="day", response="biomass_g",
+  group="treatment", n_start=10, seed=5)
+dp
+```
+
+The phase centers are constrained to remain ordered. This reduces label switching between phases but does not by itself prove that the biological process has exactly two phases.
+
+## 38. Stability points
+
+```{r eval=FALSE}
+growth_stability(dp)
+```
+
+For a sum of logistics, inflection and stability points should be evaluated on the complete summed trajectory. Component-specific formulas can give a different answer [@MischanEtAl2015].
+
+## 39. Changepoints
+
+```{r}
+growth_changepoint(subset(coffee, treatment == "control"), time="day", response="biomass_g")
+growth_changepoint(subset(coffee, treatment == "stress"), time="day", response="biomass_g")
+```
+
+A continuous segmented regression locates a slope change. It is exploratory evidence about trajectory structure rather than a mechanistic developmental phase [@Muggeo2003].
+
+# Part XIII. Disturbance and defoliation
+
+## 40. Known events
+
+```{r}
+defol <- growth_example_data("bean_defoliation")
+growth_event(defol, time="day", event_time=30, unit="plant_id", response="total_mass_g")
+```
+
+## 41. Iterative defoliation analysis
+
+```{r}
+def_sub <- subset(defol, treatment=="defoliated")
+gd <- growth_defoliation(def_sub, time="day", total_mass="total_mass_g",
+  leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2",
+  total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g",
+  leaf_area_loss="leaf_area_loss_m2", unit="plant_id")
+gd
+```
+
+The losses are measured inputs. This reflects the motivation of Anten and Ackerly for analyzing abrupt periodic biomass losses that violate ordinary smooth growth assumptions [@AntenAckerly2001].
+
+## 42. Compensatory growth
+
+```{r}
+growth_compensation(defol, group="treatment", control="control", response="total_mass_g",
+  time="day", unit="plant_id")
+```
+
+Compensation should be interpreted relative to a clearly defined reference and time interval.
+
+# Part XIV. Density and competition
+
+## 43. Density response
+
+```{r}
+md <- growth_example_data("maize_density")
+growth_density(md, density="density_plants_m2", plant_mass="plant_mass_g")
+```
+
+## 44. Neighborhood competition
+
+```{r}
+tree <- growth_example_data("tree_competition")
+growth_neighbor(tree, x="x_m", y="y_m", size="size_cm", id="plant_id", radius=3)
+```
+
+The neighborhood index is transparent and generic. It is not the exact zone-of-influence model developed by Gates [@Gates1982].
+
+## 45. Coupled competition simulation
+
+```{r}
+init <- c(1,1.2,0.9)
+alpha <- matrix(c(0,.2,.1,.2,0,.15,.1,.15,0),3,3,byrow=TRUE)
+growth_competition(initial_size=init, r=0.08, K=10, competition_matrix=alpha, times=seq(0,20,by=2))
+```
+
+The simulator is a generic coupled logistic system. Use it for transparent scenario analysis rather than attributing mechanistic meaning unsupported by the parameterization.
+
+# Part XV. Thresholds, plateaus, harvest, and planning
+
+## 46. Threshold time
+
+```{r}
+growth_threshold(fl, threshold=0.5, type="fraction")
+```
+
+## 47. Plateau definitions
+
+```{r}
+growth_plateau_time(fl, criterion="response", response_fraction=0.95)
+growth_plateau_time(fl, criterion="rate", rate_fraction=0.05)
+```
+
+A response plateau and a rate plateau are different definitions. Always report the criterion.
+
+## 48. Conditional harvest optimization
+
+```{r}
+growth_harvest_opt(fl, price=1, cost_per_time=0.01, discount_rate=0.001, harvest_cost=0.5)
+```
+
+This optimum is conditional on the fitted model and the supplied economic assumptions. It is not an automatic farm recommendation.
+
+## 49. Observation schedules
+
+```{r}
+growth_schedule(fl, n=7, method="rate_curvature")
+growth_schedule(time_range=c(0,80), n=7, method="equal")
+```
+
+The rate-curvature schedule is a transparent heuristic. It does not claim D-optimality.
+
+## 50. Design simulation and trait-level power
+
+```{r}
+sim <- growth_design_sim("logistic", parameters=c(asym=100,mid=35,scale=8),
+  times=c(0,10,20,30,40,50,60), n_unit=8, sigma=3, seed=9)
+head(sim)
+growth_power(effect=5, trait_sd=7, n_unit=12, n_sim=1000, seed=10)
+```
+
+Trait-level power is useful for planning a contrast when a plausible trait SD is available. It does not replace simulation from a full mixed or Bayesian model when those structures determine power.
+
+# Part XVI. Consolidated release workflow
+
+## 51. Planning-only release object
+
+```{r}
+release_plan <- growth_workflow(maize_g, objective="trajectory", execute=FALSE, seed=20260827)
+release_plan
+growth_workflow_audit(release_plan)
+```
+
+## 52. Executed parametric release object
+
+```{r}
+release_fit <- growth_workflow(one, time="day", response="biomass_g",
+  strategy="parametric", models=c("logistic","gompertz","richards"),
+  n_start=5, seed=20260827)
+release_fit
+growth_workflow_audit(release_fit)
+```
+
+## 53. Standardized tables
+
+```{r}
+growth_table(release_fit, "traits")
+growth_table(release_fit, "comparison")
+growth_table(release_fit, "audit")
+```
+
+## 54. Markdown analysis record
+
+```{r}
+report <- growth_report(release_fit)
+head(report, 20)
+```
+
+## 55. Export bundle
+
+```{r eval=FALSE}
+growth_export(release_fit, "release_bundle", format="bundle")
+```
+
+The bundle contains an RDS object because nested statistical structures cannot be represented faithfully in CSV alone.
+
+# Part XVII. Integrated case-study reasoning
+
+## 56. Case A: destructive field experiment
+
+Suppose maize plots receive four nitrogen rates and four blocks. Three plants are harvested from each plot at six times. The plot is randomized and persistent; harvested plants are subsamples. A defensible workflow is:
+
+1. declare `sampling = "destructive"`;
+2. declare `experimental_unit = "plot_id"`;
+3. calculate classical rates after plot by time aggregation;
+4. use plot-level trajectory comparison rather than treating plant rows as repeated subjects;
+5. use MANOVA only if the common harvest-time requirement is satisfied;
+6. use cluster resampling at plot level when bootstrap uncertainty is intended;
+7. report plot as the inferential unit.
+
+## 57. Case B: repeated imaging experiment
+
+Suppose the same soybean plants are imaged every two days. The plant is the persistent subject. Candidate questions differ:
+
+- for treatment effects over time, use mixed models;
+- for shape and derivative exploration, use smoothers;
+- for trajectory heterogeneity, use FPCA;
+- for interpretable sigmoid landmarks, use parametric curves with unit-aware uncertainty;
+- for Bayesian parameter differences, use hierarchical nonlinear models when priors and diagnostics are adequate.
+
+No single method replaces the others because the estimands differ.
+
+## 58. Case C: defoliation experiment
+
+When leaves are removed deliberately, a smooth curve through remaining biomass can conceal the biological event. Record removed total mass, leaf mass, and leaf area if possible. Use event-aware or iterative defoliation analysis. Distinguish regrowth production from net standing biomass after loss [@AntenAckerly2001].
+
+## 59. Case D: multiphase woody growth
+
+When a trajectory appears to contain more than one growth episode, compare monophasic and multiphasic descriptions. Verify that temporal support is adequate, that ordered phase parameters are identifiable, and that derivative-based landmarks on the full sum are stable [@MischanEtAl2015].
+
+## 60. Case E: management decision
+
+A harvest optimum is not a biological constant. It depends on yield trajectory, price, costs, discounting, and the feasible harvest interval. Present sensitivity to these inputs before giving an agronomic recommendation.
+
+# Part XVIII. Numerical validation mindset
+
+## 61. Known-truth checks
+
+Every major numerical component should have at least one known-truth or limiting-case check. Examples include:
+
+- Logistic response equals half the asymptote at its midpoint.
+- Gompertz response equals `A/e` at its inflection time.
+- Richards with shape equal to one reduces to the package Logistic parameterization.
+- Beta growth equals zero at time zero and reaches the declared maximum at the end time according to the corrected formula.
+- Expolinear derivative approaches its declared maximum linear rate.
+- Zero competition coefficients reproduce independent logistic trajectories.
+- A 50 percent response threshold for Logistic agrees with its midpoint.
+- Partition fractions plus unallocated fraction close to one within numerical tolerance.
+
+## 62. Sensitivity checks
+
+Numerical validity also requires sensitivity analysis.
+
+- Increase nonlinear multistarts.
+- Change the smoother penalty or span.
+- Densify derivative grids.
+- Reduce RK4 integration step size.
+- Increase bootstrap replicates.
+- Increase Monte Carlo power simulations.
+- Inspect prior sensitivity in Bayesian models.
+- Compare alternative residual correlation structures when scientifically plausible.
+
+# Part XIX. Common errors and why they matter
+
+## 63. Pseudoreplication
+
+Treating multiple plants from one plot as independent treatment replicates inflates apparent information. The software cannot repair an invalid inferential unit after the fact.
+
+## 64. Ignoring time spacing
+
+Discrete AR(1) assumes a different structure from continuous-time AR(1). Irregularly spaced observations need a covariance model that respects actual gaps if correlation is part of inference.
+
+## 65. Selecting a model only by R-squared
+
+Different nonlinear curves can have very high descriptive R-squared yet imply different asymptotes, timing, and extrapolation. Use residual, numerical, predictive, and biological diagnostics.
+
+## 66. Using smooth derivatives outside support
+
+Derivative estimates near or beyond boundaries are sensitive to smoothing and extrapolation. Prefer interior interpretation unless a mechanistic model justifies extrapolation.
+
+## 67. Hiding bootstrap failures
+
+Failed nonlinear refits indicate numerical instability or weak model support. Report the success fraction.
+
+## 68. Ignoring Bayesian divergences
+
+Divergent transitions can indicate poor exploration of the posterior geometry. Increasing `adapt_delta` may help, but reparameterization and model reconsideration may be necessary.
+
+## 69. Calling every slope change a phase
+
+A statistical breakpoint is not automatically a phenological transition. Align mathematical evidence with independent biological observations.
+
+## 70. Overinterpreting a harvest optimum
+
+A mathematically precise optimum can be scientifically fragile if price, cost, or model assumptions are uncertain. Report sensitivity.
+
+# Part XX. Writing Methods and Results
+
+## 71. Methods template for destructive growth
+
+Describe the randomized persistent unit, number of subsamples per harvest, harvest schedule, measured quantities, aggregation rule, growth indices or trajectory model, residual diagnostics, uncertainty procedure, and software version. If curves are compared, state the candidate set and why each candidate was biologically plausible.
+
+## 72. Methods template for repeated growth
+
+Describe the plant or subject identifier, observation schedule, treatment assignment, fixed effects, random effects, residual correlation, variance structure, estimation method, diagnostic criteria, and missing-data handling.
+
+## 73. Results template for nonlinear curves
+
+Lead with biological traits and uncertainty, not only coefficient tables. Report whether the candidate family was stable across fitting starts and whether residual patterns were acceptable. Describe timing differences in units meaningful to the crop.
+
+## 74. Results template for Bayesian curves
+
+Report posterior median or mean with credible intervals for biologically interpretable traits. Include sampler diagnostics and posterior predictive adequacy. Avoid declaring a treatment effect only because a credible interval excludes zero without discussing magnitude and agronomic importance.
+
+# Part XXI. Choosing figures
+
+## 75. Raw data plus trajectory
+
+Show observed data at the experimental-unit level when possible. Overlay fitted means and uncertainty rather than replacing raw data with a smooth line.
+
+## 76. Derivative figure
+
+Plot the derivative with the same time units as the main trajectory. Mark the estimated maximum rate and its uncertainty if available.
+
+## 77. Functional analysis figure
+
+Display the mean function, leading eigenfunctions, and representative reconstructed trajectories for positive and negative scores. This prevents purely algebraic interpretation of FPCA components.
+
+## 78. Multiphase figure
+
+Plot the complete summed trajectory and derivative-based landmarks. Component curves may be added as a decomposition, but do not confuse component midpoint parameters with the full-curve inflection points.
+
+# Part XXII. Release validation
+
+## 79. Source-level checks
+
+The frozen source snapshot includes static checks for exports, S3 methods, manuals, bibliography keys, double-source reference metadata, teaching-data checksums, example coverage, vignette depth, and source hygiene.
+
+## 80. Runtime checks still required
+
+Static validation cannot execute R. Before calling a source snapshot runtime-validated, run:
+
+```{r eval=FALSE}
+roxygen2::roxygenise("agriGrowthFlow")
+devtools::test("agriGrowthFlow")
+devtools::build_vignettes("agriGrowthFlow")
+```
+
+Then use the system shell:
+
+```text
+R CMD build agriGrowthFlow
+R CMD check --as-cran agriGrowthFlow_1.0.0.tar.gz
+```
+
+Optional Bayesian tests require the corresponding packages and a functioning Stan toolchain.
+
+# Part XXIII. Final release checklist
+
+## 81. Data and design
+
+- Sampling mechanism declared.
+- Persistent unit declared.
+- Units documented.
+- Missingness reviewed.
+- Destructive subsampling distinguished from repeated measurements.
+
+## 82. Model
+
+- Scientific objective stated.
+- Candidate families justified.
+- Numerical convergence checked.
+- Residual or predictive diagnostics checked.
+- Extrapolation limits identified.
+
+## 83. Uncertainty
+
+- Resampling unit matches design.
+- Bootstrap failures retained.
+- Bayesian priors inspected.
+- MCMC diagnostics passed or explained.
+- Trait uncertainty reported on biological scales.
+
+## 84. Interpretation
+
+- Effect magnitude discussed.
+- Biological plausibility assessed.
+- Statistical landmarks not mislabeled as developmental mechanisms.
+- Decision outputs presented as conditional when assumptions enter explicitly.
+
+## 85. Reproducibility
+
+- Seed recorded where stochastic algorithms are used.
+- Exact package version recorded.
+- Full R object archived.
+- Tables exported from code.
+- Source snapshot or R-built tarball retained.
+
+# Conclusion
+
+The 1.0.0 release is a consolidation rather than a claim that every plant-growth question can be automated. Its value is that the same design declaration can flow into classical, parametric, longitudinal, flexible, uncertainty, biological-event, and decision modules without losing the experimental unit. The new workflow, audit, reporting, and export functions provide a reproducible shell around those specialized analyses. The final scientific conclusion remains a synthesis of design, data quality, model diagnostics, uncertainty, and agronomic meaning.
+
+# Appendix A. Extended glossary
+
+## AGR
+
+**Category:** Absolute growth rate.
+
+Change in a size variable per unit time. It is scale dependent and should retain the physical units of the response divided by time.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## RGR
+
+**Category:** Relative growth rate.
+
+Logarithmic change in plant mass per unit time. It compares proportional growth and requires positive mass values.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## NAR
+
+**Category:** Net assimilation rate.
+
+Biomass gain per unit leaf area over time under the classical interval formulation.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## LAR
+
+**Category:** Leaf area ratio.
+
+Leaf area per unit total plant mass.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## SLA
+
+**Category:** Specific leaf area.
+
+Leaf area per unit leaf dry mass.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## LMR
+
+**Category:** Leaf mass ratio.
+
+Leaf dry mass per unit total plant mass.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## LAI
+
+**Category:** Leaf area index.
+
+Leaf area per unit ground area.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## LAD
+
+**Category:** Leaf area duration.
+
+Time integral of LAI over a defined interval.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## Persistent unit
+
+**Category:** Experimental hierarchy.
+
+The unit whose trajectory or treatment assignment persists across the intended longitudinal comparison.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## Inflection time
+
+**Category:** Trajectory landmark.
+
+Time at which the second derivative changes sign under the fitted curve.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## Maximum absolute rate
+
+**Category:** Trajectory landmark.
+
+Maximum first derivative of the fitted response over the supported time range or model domain.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## AUC
+
+**Category:** Trajectory summary.
+
+Integral of the fitted response over a declared time support.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## AR(1)
+
+**Category:** Residual correlation.
+
+Discrete lag-one correlation structure in which adjacent equally indexed observations have correlation rho.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## CAR(1)
+
+**Category:** Residual correlation.
+
+Continuous-time exponential correlation structure that accounts for unequal temporal spacing.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## FPCA
+
+**Category:** Functional data analysis.
+
+Principal component decomposition of variation among entire trajectories.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## Bootstrap
+
+**Category:** Uncertainty.
+
+Resampling-based approximation to sampling variation. Its validity depends on resampling a unit consistent with the data-generating design.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## PSIS-LOO
+
+**Category:** Predictive evaluation.
+
+Approximate leave-one-out predictive evaluation with Pareto-k diagnostics.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## Stacking
+
+**Category:** Model combination.
+
+Predictive weighting of candidate models to optimize out-of-sample predictive performance.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## Stability point
+
+**Category:** Higher-order landmark.
+
+A landmark derived from the fourth derivative in the implemented logistic-growth context.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## Changepoint
+
+**Category:** Segmented trajectory.
+
+Estimated time at which the slope of a continuous piecewise-linear model changes.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+## Plateau
+
+**Category:** Decision landmark.
+
+A user-defined practical threshold based on response level or growth rate, not a universal biological constant.
+
+**Interpretation check:** State the units, model or interval definition, and whether the value is observed directly or derived from a fitted trajectory.
+
+**Common error:** Treating the quantity as comparable across experiments without checking scale, support, and design.
+
+# Appendix B. Worked interpretation prompts
+
+For every analysis, answer the following questions before writing the Results section.
+
+## B1. What is the estimand?
+
+Write one sentence that names the quantity being estimated. Examples include mean RGR from day 20 to day 30, treatment difference in the quadratic time component, population-level Logistic midpoint, posterior difference in `t50`, or time at which the fitted response reaches 95 percent of its finite upper level.
+
+## B2. What is the independent unit?
+
+Name the randomized plot, plant, pot, tray, or other unit. If destructive subsamples exist, state explicitly that they are subsamples and how they enter the analysis.
+
+## B3. What assumptions connect the data to the estimand?
+
+List curve shape, covariance structure, residual distribution, monotonicity, smoothing penalty, prior, or other assumptions that materially affect the estimate.
+
+## B4. What uncertainty is represented?
+
+Distinguish residual error, between-unit variation, bootstrap sampling uncertainty, posterior uncertainty, model-selection uncertainty, and prediction uncertainty. These are not interchangeable.
+
+## B5. What is the support?
+
+State the observed time range. If a trait requires extrapolation, label it and evaluate sensitivity to the model family.
+
+## B6. Is the effect agronomically meaningful?
+
+Convert statistical differences into biological units. A small p-value can accompany a negligible difference, while a practically important difference can be imprecise in a small experiment.
+
+# Appendix C. Suggested teaching sequence
+
+1. Begin with destructive versus repeated sampling using two visual diagrams.
+2. Calculate AGR and RGR manually from two harvests.
+3. Decompose LAR into SLA and LMR.
+4. Fit Logistic and Gompertz curves to the same dataset and compare derived traits.
+5. Demonstrate how repeated plant measurements violate independent-error assumptions.
+6. Fit a mixed model and compare residual correlation structures.
+7. Fit a smoothing spline and inspect first derivatives.
+8. Introduce FPCA as variation among complete curves.
+9. Bootstrap a nonlinear trait and show failed refits.
+10. Introduce Bayesian priors through prior predictive simulation.
+11. Compare monophasic and diphasic growth.
+12. Analyze a measured defoliation event.
+13. Simulate competition and discuss model scope.
+14. Convert an accepted curve into a threshold or conditional harvest decision.
+15. Finish with `growth_workflow()`, audit, report, and export.
+
+# Appendix D. Reproducibility record template
+
+For each project, retain a plain-text record containing:
+
+- project identifier;
+- data file checksum;
+- analysis date;
+- agriGrowthFlow version;
+- R version;
+- platform;
+- random seed;
+- selected workflow strategy;
+- model candidates;
+- optional backend versions;
+- number of bootstrap replicates or MCMC iterations;
+- validation status;
+- exported object checksum;
+- reviewer notes.
+
+This record complements, rather than replaces, the complete R analysis object.
