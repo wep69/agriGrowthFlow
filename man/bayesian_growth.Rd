@@ -113,7 +113,7 @@ growth_posterior_traits(
   \item{grid_n}{Grid size for AUC over observed support.}
 }
 \details{
-Positive growth parameters are modeled through log-transformed nonlinear predictors. For example, \code{asym = exp(log_asym)} and \code{scale = exp(log_scale)}. This keeps these quantities positive without a hard truncation boundary in the Stan parameter space. The Richards shape is treated similarly.
+Positive growth parameters are modeled through log-transformed nonlinear predictors. For example, \code{asym = exp(logAsym)} and \code{scale = exp(logScale)}. This keeps these quantities positive without a hard truncation boundary in the Stan parameter space. The Richards shape is treated similarly.
 
 The default prior table is scaled to the observed time and response range and should be treated as a starting template. A scientific analysis should inspect prior predictive behavior and replace weakly informative defaults with biologically justified priors when prior information is available.
 

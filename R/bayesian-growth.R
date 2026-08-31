@@ -34,18 +34,18 @@
 .agf_bayes_nlpars <- function(model) {
   model <- .agf_bayes_check_model(model)
   switch(model,
-    logistic = c("log_asym", "mid", "log_scale"),
-    gompertz = c("log_asym", "mid", "log_scale"),
-    richards = c("log_asym", "mid", "log_scale", "log_shape")
+    logistic = c("logAsym", "mid", "logScale"),
+    gompertz = c("logAsym", "mid", "logScale"),
+    richards = c("logAsym", "mid", "logScale", "logShape")
   )
 }
 
 .agf_bayes_main_formula <- function(model) {
   model <- .agf_bayes_check_model(model)
   txt <- switch(model,
-    logistic = "agf_y ~ exp(log_asym) / (1 + exp(-(agf_time - mid) / exp(log_scale)))",
-    gompertz = "agf_y ~ exp(log_asym) * exp(-exp(-(agf_time - mid) / exp(log_scale)))",
-    richards = "agf_y ~ exp(log_asym) * (1 + exp(log_shape) * exp(-(agf_time - mid) / exp(log_scale)))^(-1 / exp(log_shape))"
+    logistic = "agf_y ~ exp(logAsym) / (1 + exp(-(agf_time - mid) / exp(logScale)))",
+    gompertz = "agf_y ~ exp(logAsym) * exp(-exp(-(agf_time - mid) / exp(logScale)))",
+    richards = "agf_y ~ exp(logAsym) * (1 + exp(logShape) * exp(-(agf_time - mid) / exp(logScale)))^(-1 / exp(logShape))"
   )
   stats::as.formula(txt)
 }
@@ -139,7 +139,7 @@
   if (identical(random, "auto")) random <- "asym"
   switch(random,
     none = character(),
-    asym = intersect("log_asym", nlpars),
+    asym = intersect("logAsym", nlpars),
     timing = intersect("mid", nlpars),
     all = nlpars
   )
@@ -192,29 +192,29 @@
   if (!is.finite(ymax) || ymax <= 0) ymax <- 1
   mid0 <- stats::median(t)
   rows <- list(
-    data.frame(nlpar = "log_asym", role = "intercept", class = "b", coef = "Intercept",
+    data.frame(nlpar = "logAsym", role = "intercept", class = "b", coef = "Intercept",
                prior = paste0("normal(", signif(log(1.1 * ymax), 6), ", 0.7)"),
-               transformation = "asym = exp(log_asym)", stringsAsFactors = FALSE),
-    data.frame(nlpar = "log_asym", role = "non_intercept", class = "b", coef = NA_character_,
-               prior = "normal(0, 0.5)", transformation = "asym = exp(log_asym)", stringsAsFactors = FALSE),
+               transformation = "asym = exp(logAsym)", stringsAsFactors = FALSE),
+    data.frame(nlpar = "logAsym", role = "non_intercept", class = "b", coef = NA_character_,
+               prior = "normal(0, 0.5)", transformation = "asym = exp(logAsym)", stringsAsFactors = FALSE),
     data.frame(nlpar = "mid", role = "intercept", class = "b", coef = "Intercept",
                prior = paste0("normal(", signif(mid0, 6), ", ", signif(max(tr / 2, 1e-3), 6), ")"),
                transformation = "mid = mid", stringsAsFactors = FALSE),
     data.frame(nlpar = "mid", role = "non_intercept", class = "b", coef = NA_character_,
                prior = paste0("normal(0, ", signif(max(tr / 3, 1e-3), 6), ")"),
                transformation = "mid = mid", stringsAsFactors = FALSE),
-    data.frame(nlpar = "log_scale", role = "intercept", class = "b", coef = "Intercept",
+    data.frame(nlpar = "logScale", role = "intercept", class = "b", coef = "Intercept",
                prior = paste0("normal(", signif(log(max(tr / 5, 1e-3)), 6), ", 1)"),
-               transformation = "scale = exp(log_scale)", stringsAsFactors = FALSE),
-    data.frame(nlpar = "log_scale", role = "non_intercept", class = "b", coef = NA_character_,
-               prior = "normal(0, 0.5)", transformation = "scale = exp(log_scale)", stringsAsFactors = FALSE)
+               transformation = "scale = exp(logScale)", stringsAsFactors = FALSE),
+    data.frame(nlpar = "logScale", role = "non_intercept", class = "b", coef = NA_character_,
+               prior = "normal(0, 0.5)", transformation = "scale = exp(logScale)", stringsAsFactors = FALSE)
   )
   if (identical(model, "richards")) {
     rows <- c(rows, list(
-      data.frame(nlpar = "log_shape", role = "intercept", class = "b", coef = "Intercept",
-                 prior = "normal(0, 0.7)", transformation = "shape = exp(log_shape)", stringsAsFactors = FALSE),
-      data.frame(nlpar = "log_shape", role = "non_intercept", class = "b", coef = NA_character_,
-                 prior = "normal(0, 0.5)", transformation = "shape = exp(log_shape)", stringsAsFactors = FALSE)
+      data.frame(nlpar = "logShape", role = "intercept", class = "b", coef = "Intercept",
+                 prior = "normal(0, 0.7)", transformation = "shape = exp(logShape)", stringsAsFactors = FALSE),
+      data.frame(nlpar = "logShape", role = "non_intercept", class = "b", coef = NA_character_,
+                 prior = "normal(0, 0.5)", transformation = "shape = exp(logShape)", stringsAsFactors = FALSE)
     ))
   }
   do.call(rbind, rows)
@@ -634,13 +634,13 @@ print.agri_growth_bayes_diagnostics <- function(x, ...) {
 
 .agf_posterior_trait_draws_one <- function(object, refrow, re_formula, draw_ids, grid_n = 201L) {
   nd <- length(draw_ids)
-  la <- .agf_nlpar_matrix(object, "log_asym", refrow, re_formula, draw_ids)[, 1L]
+  la <- .agf_nlpar_matrix(object, "logAsym", refrow, re_formula, draw_ids)[, 1L]
   mid <- .agf_nlpar_matrix(object, "mid", refrow, re_formula, draw_ids)[, 1L]
-  ls <- .agf_nlpar_matrix(object, "log_scale", refrow, re_formula, draw_ids)[, 1L]
+  ls <- .agf_nlpar_matrix(object, "logScale", refrow, re_formula, draw_ids)[, 1L]
   asym <- exp(la); scale <- exp(ls)
   model <- object$model
   if (identical(model, "richards")) {
-    lsh <- .agf_nlpar_matrix(object, "log_shape", refrow, re_formula, draw_ids)[, 1L]
+    lsh <- .agf_nlpar_matrix(object, "logShape", refrow, re_formula, draw_ids)[, 1L]
     shape <- exp(lsh)
   } else shape <- rep(NA_real_, nd)
 

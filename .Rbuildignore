@@ -34,6 +34,7 @@
 ^TREE_1\.0\.0\.txt$
 ^cran-comments\.md$
 ^LOCAL_VALIDATION_GUIDE_1\.0\.0\.md$
+^COMMIT_MESSAGE\.md$
 ^cheatsheet$
 ^docs$
 ^pkgdown$

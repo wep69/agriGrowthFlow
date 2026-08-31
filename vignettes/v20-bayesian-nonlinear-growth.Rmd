@@ -85,7 +85,7 @@ This has three advantages:
 2. fixed and random effects can be modeled on an unconstrained linear-predictor scale;
 3. prior distributions can be specified on a numerically stable transformed scale.
 
-The parameter names exposed by the Bayesian implementation are `log_asym`, `mid`, `log_scale`, and, for Richards, `log_shape`.
+The parameter names exposed by the Bayesian implementation are `logAsym`, `mid`, `logScale`, and, for Richards, `logShape`.
 
 # 4. Logistic parameterization
 
@@ -111,7 +111,7 @@ The parameter `mid` here is a location parameter associated with the inflection 
 
 # 6. Richards parameterization
 
-A Richards trajectory adds a positive shape parameter. The package uses a transformed `log_shape` predictor and maps it to
+A Richards trajectory adds a positive shape parameter. The package uses a transformed `logShape` predictor and maps it to
 
 \[
 \nu=\exp(\eta_\nu)>0.
@@ -163,7 +163,7 @@ growth_prior(sun1, "gompertz", time = "day", response = "biomass_g")
 growth_prior(sun1, "richards", time = "day", response = "biomass_g")
 ```
 
-The Richards prior includes `log_shape`, which is absent from Logistic and Gompertz.
+The Richards prior includes `logShape`, which is absent from Logistic and Gompertz.
 
 # 10. What a biologically informed prior could express
 
@@ -308,9 +308,9 @@ Advanced users can override the package templates with `nlpar_formulas`. For exa
 
 ```{r custom-formula, eval=FALSE}
 custom <- list(
-  log_asym = ~ 1,
+  logAsym = ~ 1,
   mid = ~ 1 + agf_group,
-  log_scale = ~ 1
+  logScale = ~ 1
 )
 
 b_custom <- growth_bayes(
@@ -450,7 +450,7 @@ Do not:
 - report posterior summaries when \(\hat R\), ESS, or divergences indicate sampling problems;
 - make every nonlinear parameter treatment-specific by default;
 - add all random effects merely because the software accepts the formula;
-- interpret transformed `log_asym` as biomass without applying the exponential transformation;
+- interpret transformed `logAsym` as biomass without applying the exponential transformation;
 - use prior-only objects for LOO comparison;
 - treat posterior predictive agreement as proof of causal validity.
 

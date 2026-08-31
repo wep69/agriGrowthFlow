@@ -2,14 +2,14 @@ test_that("Bayesian prior templates use transformed positive parameters", {
   d <- growth_example_data("sunflower_sigmoid")
   p <- growth_prior(d, "logistic", time = "day", response = "biomass_g")
   expect_s3_class(p, "agri_growth_prior")
-  expect_true(all(c("log_asym", "mid", "log_scale") %in% p$nlpar))
+  expect_true(all(c("logAsym", "mid", "logScale") %in% p$nlpar))
   expect_true(any(grepl("asym = exp", p$transformation, fixed = TRUE)))
 })
 
 test_that("Richards prior adds positive shape predictor", {
   d <- growth_example_data("sunflower_sigmoid")
   p <- growth_prior(d, "richards", time = "day", response = "biomass_g")
-  expect_true("log_shape" %in% p$nlpar)
+  expect_true("logShape" %in% p$nlpar)
   expect_true(any(grepl("shape = exp", p$transformation, fixed = TRUE)))
 })
 
@@ -34,8 +34,8 @@ test_that("default Bayesian formula templates distinguish group and hierarchy", 
   z <- agriGrowthFlow:::.agf_prepare_bayes(d, time = "day", response = "height_cm",
                                            group = "water_regime", unit = "plant_id")
   fs <- agriGrowthFlow:::.agf_bayes_default_nlpar_formulas("logistic", z, "auto", "auto")
-  expect_true(grepl("agf_group", paste(deparse(fs$log_asym), collapse = " "), fixed = TRUE))
-  expect_true(grepl("agf_unit", paste(deparse(fs$log_asym), collapse = " "), fixed = TRUE))
+  expect_true(grepl("agf_group", paste(deparse(fs$logAsym), collapse = " "), fixed = TRUE))
+  expect_true(grepl("agf_unit", paste(deparse(fs$logAsym), collapse = " "), fixed = TRUE))
   expect_false(grepl("agf_unit", paste(deparse(fs$mid), collapse = " "), fixed = TRUE))
 })
 
