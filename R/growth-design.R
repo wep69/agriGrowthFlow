@@ -11,10 +11,20 @@
 #' @export
 #'
 #' @examples
+#' # 1) Automatic resolution from the sampling mechanism
 #' d <- growth_example_data("maize_destructive")
 #' g <- growth_data(d, time = "day", sampling = "destructive",
-#'                  experimental_unit = "plot_id", treatment = "nitrogen", block = "block")
-#' growth_design(g, design = "rcbd")
+#'                  experimental_unit = "plot_id", treatment = "nitrogen",
+#'                  block = "block", total_mass = "total_mass_g")
+#' growth_design(g)
+#'
+#' # 2) Design declared explicitly
+#' des <- growth_design(g, design = "rcbd", treatment = "nitrogen", block = "block")
+#' des$design
+#'
+#' # 3) Harvest unit and metadata
+#' growth_design(g, design = "serial_destructive", treatment = "nitrogen",
+#'               harvest_unit = "harvest_unit", metadata = list(trial = "E1"))
 
 growth_design <- function(x,
                           design = c("auto", "crd", "rcbd", "repeated", "serial_destructive"),
@@ -55,9 +65,23 @@ growth_design <- function(x,
   }
   if (!is.list(metadata)) stop("`metadata` must be a named list.", call. = FALSE)
 
+  design_requested <- design
+  if (identical(design, "auto")) {
+    design <- if (identical(sampling, "destructive")) {
+      "serial_destructive"
+    } else if (identical(sampling, "repeated")) {
+      "repeated"
+    } else if (!is.null(block)) {
+      "rcbd"
+    } else {
+      "crd"
+    }
+  }
+
   out <- list(
     data = data,
     design = design,
+    design_requested = design_requested,
     sampling = sampling,
     roles = roles,
     metadata = metadata,
@@ -68,9 +92,26 @@ growth_design <- function(x,
 }
 
 #' @export
+#' @examples
+#' # 1) Automatically resolved design
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", treatment = "nitrogen",
+#'                  block = "block", total_mass = "total_mass_g")
+#' print(growth_design(g))
+#'
+#' # 2) Declared design
+#' print(growth_design(g, design = "rcbd", treatment = "nitrogen", block = "block"))
+#'
+#' # 3) Invisible return
+#' dz <- growth_design(g)
+#' identical(print(dz), dz)
 print.agri_growth_design <- function(x, ...) {
   cat("<agri_growth_design>\n")
   cat("Design:", x$design, "\n")
+  if (!is.null(x$design_requested) && !identical(x$design_requested, x$design)) {
+    cat("Design requested:", x$design_requested, "\n")
+  }
   cat("Sampling:", x$sampling, "\n")
   if (!is.null(x$roles$experimental_unit)) cat("Experimental unit:", x$roles$experimental_unit, "\n")
   if (!is.null(x$roles$subject)) cat("Subject/plant:", x$roles$subject, "\n")
@@ -93,6 +134,21 @@ print.agri_growth_design <- function(x, ...) {
 #'
 #' @return An `agri_growth_validation` object.
 #' @export
+#' @examples
+#' # 1) Well-behaved data
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' growth_validate(g)
+#'
+#' # 2) Negative mass raises an error-level issue
+#' d2 <- d; d2$total_mass_g[1] <- -1
+#' g2 <- growth_data(d2, time = "day", sampling = "destructive",
+#'                   experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' growth_validate(g2)$issues
+#'
+#' # 3) strict stops on error-level issues
+#' try(growth_validate(g2, strict = TRUE))
 
 growth_validate <- function(x, strict = FALSE, min_times = 2L, desirable_times = 4L, tolerance = 1e-8) {
   if (inherits(x, "agri_growth_design")) {
@@ -241,6 +297,22 @@ growth_validate <- function(x, strict = FALSE, min_times = 2L, desirable_times =
 }
 
 #' @export
+#' @examples
+#' # 1) Validation without issues
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' print(growth_validate(g))
+#'
+#' # 2) Validation with listed issues
+#' d2 <- d; d2$total_mass_g[1] <- -1
+#' g2 <- growth_data(d2, time = "day", sampling = "destructive",
+#'                   experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' print(growth_validate(g2))
+#'
+#' # 3) Invisible return
+#' v <- growth_validate(g)
+#' identical(print(v), v)
 print.agri_growth_validation <- function(x, ...) {
   cat("<agri_growth_validation> status:", x$status, "\n")
   cat("Rows:", x$n_rows, " Distinct times:", x$n_times, " Sampling:", x$sampling, "\n")
@@ -258,6 +330,21 @@ print.agri_growth_validation <- function(x, ...) {
 #' @param desirable_times Desirable number of time points per phase.
 #' @return An `agri_growth_plan` object containing validation and recommendations.
 #' @export
+#' @examples
+#' # 1) Recommendations for complete data
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' length(growth_plan(g)$recommendations)
+#'
+#' # 2) An extra recommendation when time support is short
+#' g2 <- growth_data(d[d$day %in% c(14, 28), ], time = "day",
+#'                   sampling = "destructive", experimental_unit = "plot_id",
+#'                   total_mass = "total_mass_g")
+#' setdiff(growth_plan(g2)$recommendations, growth_plan(g)$recommendations)
+#'
+#' # 3) The plan also accepts a design object
+#' growth_plan(growth_design(g, treatment = "nitrogen", block = "block"))
 
 growth_plan <- function(x, desirable_times = 4L) {
   v <- growth_validate(x, strict = FALSE, desirable_times = desirable_times)
@@ -298,6 +385,19 @@ growth_plan <- function(x, desirable_times = 4L) {
 }
 
 #' @export
+#' @examples
+#' # 1) Plan with recommendations
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' print(growth_plan(g))
+#'
+#' # 2) Invisible return
+#' p <- growth_plan(g)
+#' identical(print(p), p)
+#'
+#' # 3) Structure
+#' str(growth_plan(g), max.level = 1)
 print.agri_growth_plan <- function(x, ...) {
   cat("<agri_growth_plan>\n")
   cat("Validation status:", x$validation$status, "\n\n")

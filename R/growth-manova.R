@@ -13,10 +13,19 @@
 #' @return A data frame with one row per persistent unit.
 #' @export
 #' @examples
-#' d <- growth_example_data("maize_destructive")
-#' growth_curve_coefficients(d, time="day", response="total_mass_g", unit="plot_id", group="nitrogen", degree=2)
-#' growth_curve_coefficients(d, time="day", response="leaf_area_m2", unit="plot_id", group="nitrogen", degree=2)
-#' growth_curve_coefficients(growth_example_data("bean_repeated"), time="day", response="height_cm", unit="plant_id", group="water_regime", degree=2)
+#' # 1) Orthogonal components of degree 2
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' cc <- growth_curve_coefficients(g, response = "height_cm")
+#' head(cc)
+#'
+#' # 2) Degree 3 on the log scale
+#' head(growth_curve_coefficients(g, response = "height_cm", degree = 3,
+#'                                transform = "log"))
+#'
+#' # 3) Stored attributes
+#' attr(cc, "degree"); attr(cc, "transform")
 growth_curve_coefficients <- function(x,
                                       time = NULL,
                                       response = NULL,
@@ -102,10 +111,20 @@ growth_curve_coefficients <- function(x,
 #' @return An object of class `agri_growth_manova`.
 #' @export
 #' @examples
-#' d <- growth_example_data("maize_destructive")
-#' growth_manova(d, time="day", response="total_mass_g", unit="plot_id", group="nitrogen", degree=2)
-#' growth_manova(d, time="day", response="leaf_area_m2", unit="plot_id", group="nitrogen", degree=2, test="Wilks")
-#' growth_manova(growth_example_data("bean_repeated"), time="day", response="height_cm", unit="plant_id", group="water_regime", degree=2)
+#' # 1) Pillai multivariate test
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' mv <- growth_manova(g, response = "height_cm", group = "water_regime")
+#' mv$test
+#'
+#' # 2) Another test statistic
+#' growth_manova(g, response = "height_cm", group = "water_regime",
+#'               test = "Wilks")$test
+#'
+#' # 3) ANOVA per curve component
+#' names(growth_manova(g, response = "height_cm",
+#'                     group = "water_regime")$component_anova)
 growth_manova <- function(x,
                           time = NULL,
                           response = NULL,
@@ -141,6 +160,19 @@ growth_manova <- function(x,
 }
 
 #' @export
+#' @examples
+#' # 1) Multivariate test summary
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' mv <- growth_manova(g, response = "height_cm", group = "water_regime")
+#' print(mv)
+#'
+#' # 2) Test statistics
+#' mv$multivariate$stats
+#'
+#' # 3) Invisible return
+#' identical(print(mv), mv)
 print.agri_growth_manova <- function(x, ...) {
   cat("<agri_growth_manova> degree:", x$degree, " test:", x$test, "\n")
   cat("Persistent units:", nrow(x$coefficients), " groups:", paste(unique(x$coefficients$group), collapse = ", "), "\n")

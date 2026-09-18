@@ -58,7 +58,10 @@
 .agf_multiphase_fit_one <- function(d, n_phases, start = NULL, n_start = 20L, seed = NULL, control = list()) {
   if (!is.numeric(n_start) || length(n_start) != 1L || n_start < 1) stop("`n_start` must be a positive integer.", call. = FALSE)
   n_start <- as.integer(n_start)
-  if (!is.null(seed)) set.seed(seed)
+  if (!is.null(seed)) {
+    .agf_restore_rng <- .agf_seed_snapshot(); on.exit(.agf_restore_rng(), add = TRUE)
+    set.seed(seed)
+  }
   base <- .agf_multiphase_start(d$.t, d$.y, n_phases)
   if (!is.null(start)) {
     if (!is.numeric(start) || length(start) != length(base) || any(!is.finite(start))) {
@@ -151,10 +154,20 @@
 #' @export
 #'
 #' @examples
+#' # 1) Two ordered logistic phases
 #' d <- growth_example_data("coffee_diphasic")
-#' growth_multiphase(d, time = "day", response = "biomass_g", n_phases = 2, n_start = 3, seed = 1)
-#' growth_multiphase(subset(d, treatment == "control"), time = "day", response = "biomass_g", n_phases = 2, n_start = 3)
-#' growth_multiphase(d, time = "day", response = "biomass_g", n_phases = 2, group = "treatment", n_start = 2)
+#' g <- growth_data(d, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "treatment",
+#'                  total_mass = "biomass_g")
+#' mp <- growth_multiphase(g, n_phases = 2, n_start = 3, seed = 1)
+#' mp$n_phases
+#'
+#' # 2) One and three phases
+#' growth_multiphase(g, n_phases = 1, n_start = 2, seed = 1)$n_phases
+#' growth_multiphase(g, n_phases = 3, n_start = 2, seed = 1)$n_phases
+#'
+#' # 3) One fit per treatment
+#' growth_multiphase(g, n_phases = 2, group = "treatment", n_start = 2, seed = 1)
 growth_multiphase <- function(x, time = NULL, response = NULL, n_phases = 2L,
                               group = NULL, start = NULL, n_start = 20L, seed = NULL,
                               aggregate = c("auto", "none", "mean"), control = list()) {
@@ -184,10 +197,20 @@ growth_multiphase <- function(x, time = NULL, response = NULL, n_phases = 2L,
 #' @export
 #'
 #' @examples
+#' # 1) Shortcut for two phases
 #' d <- growth_example_data("coffee_diphasic")
-#' growth_diphasic(d, time = "day", response = "biomass_g", n_start = 3, seed = 1)
-#' growth_diphasic(subset(d, treatment == "control"), time = "day", response = "biomass_g", n_start = 2)
-#' growth_diphasic(d, time = "day", response = "biomass_g", group = "treatment", n_start = 2)
+#' g <- growth_data(d, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", total_mass = "biomass_g")
+#' dp <- growth_diphasic(g, n_start = 3, seed = 1)
+#' dp$n_phases
+#'
+#' # 2) Reproducible result with a fixed seed
+#' a <- growth_diphasic(g, n_start = 2, seed = 7)
+#' b <- growth_diphasic(g, n_start = 2, seed = 7)
+#' identical(a$rss, b$rss)
+#'
+#' # 3) Fitted components
+#' growth_diphasic(g, n_start = 2, seed = 1)$components
 growth_diphasic <- function(x, time = NULL, response = NULL, group = NULL, start = NULL,
                             n_start = 20L, seed = NULL, aggregate = c("auto", "none", "mean"), control = list()) {
   growth_multiphase(x, time = time, response = response, n_phases = 2L, group = group,
@@ -257,11 +280,18 @@ growth_diphasic <- function(x, time = NULL, response = NULL, group = NULL, start
 #' @export
 #'
 #' @examples
-#' d <- growth_example_data("sunflower_sigmoid")
-#' f <- growth_fit(subset(d, cultivar == "C1"), "logistic", time = "day", response = "biomass_g")
-#' growth_stability(f)
-#' growth_stability(f, n = 501)
-#' growth_stability(growth_diphasic(growth_example_data("coffee_diphasic"), time = "day", response = "biomass_g", n_start = 2), n = 501)
+#' # 1) Stability points of the summed trajectory
+#' d <- growth_example_data("coffee_diphasic")
+#' g <- growth_data(d, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", total_mass = "biomass_g")
+#' mp <- growth_multiphase(g, n_phases = 2, n_start = 3, seed = 1)
+#' growth_stability(mp)
+#'
+#' # 2) Extended search interval
+#' growth_stability(mp, interval = c(0, 150), n = 501)
+#'
+#' # 3) Structure of the result
+#' str(growth_stability(mp), max.level = 1)
 growth_stability <- function(object, interval = NULL, n = 2001L) {
   n <- .agf_grid_n(n, min_n = 101L, name = "n")
   if (inherits(object, "agri_growth_multiphase_collection")) {
@@ -290,10 +320,18 @@ growth_stability <- function(object, interval = NULL, n = 2001L) {
 #' @export
 #'
 #' @examples
+#' # 1) Exploratory changepoint search
 #' d <- growth_example_data("coffee_diphasic")
-#' growth_changepoint(subset(d, treatment == "control"), time = "day", response = "biomass_g")
-#' growth_changepoint(subset(d, treatment == "stress"), time = "day", response = "biomass_g")
-#' growth_changepoint(subset(d, treatment == "control"), time = "day", response = "biomass_g", min_segment = 3)
+#' cp <- growth_changepoint(d, time = "day", response = "biomass_g")
+#' cp$breakpoint
+#'
+#' # 2) Explicit candidates
+#' growth_changepoint(d, time = "day", response = "biomass_g",
+#'                    candidates = c(30, 60, 90))$breakpoint
+#'
+#' # 3) Larger minimum segment
+#' growth_changepoint(d, time = "day", response = "biomass_g",
+#'                    min_segment = 5)$candidates
 growth_changepoint <- function(data, time, response, min_segment = 3L, candidates = NULL) {
   if (!is.numeric(min_segment) || length(min_segment) != 1L || !is.finite(min_segment) || min_segment < 2 || abs(min_segment - round(min_segment)) > 1e-8) stop("`min_segment` must be an integer of at least 2.", call. = FALSE)
   min_segment <- as.integer(min_segment)
@@ -331,12 +369,27 @@ growth_changepoint <- function(data, time, response, min_segment = 3L, candidate
 #' @export
 #'
 #' @examples
+#' # 1) A known event on a raw data frame
 #' d <- growth_example_data("bean_defoliation")
-#' growth_event(d, time = "day", response = "total_mass_g", event_time = 21, unit = "plant_id", event_type = "defoliation")
-#' growth_event(d, time = "day", response = "leaf_area_m2", event_time = 21, unit = "plant_id")
-#' growth_event(subset(d, treatment == "defoliated"), time = "day", response = "total_mass_g", event_time = 21, event_amount = 2)
+#' ev <- growth_event(d, time = "day", response = "total_mass_g",
+#'                    event_time = 30, unit = "plant_id")
+#' class(ev)
+#'
+#' # 2) The same event from the declared object
+#' g <- growth_data(d, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "treatment",
+#'                  total_mass = "total_mass_g")
+#' growth_event(g, time = "day", response = "total_mass_g", event_time = 30)
+#'
+#' # 3) Event type and amount
+#' ev2 <- growth_event(d, time = "day", response = "total_mass_g",
+#'                     event_time = 30, event_type = "defoliation",
+#'                     event_amount = 0.5)
+#' ev2$event_type
 growth_event <- function(data, time, response, event_time, unit = NULL,
                          event_type = "disturbance", event_amount = NULL) {
+  resolved <- .agf_resolve_data(data, time = time, response = response, unit = unit)
+  data <- resolved$data; time <- resolved$time; response <- resolved$response; unit <- resolved$unit
   .agf_assert_data_frame(data); .agf_assert_column(data, time, "time", FALSE); .agf_assert_column(data, response, "response", FALSE)
   .agf_assert_column(data, unit, "unit", TRUE)
   if (!is.numeric(event_time) || length(event_time) != 1L || !is.finite(event_time)) stop("`event_time` must be a finite scalar.", call. = FALSE)
@@ -422,13 +475,35 @@ growth_event <- function(data, time, response, event_time, unit = NULL,
 #' @export
 #'
 #' @examples
+#' # 1) Defoliation with measured losses
 #' d <- growth_example_data("bean_defoliation")
-#' growth_defoliation(subset(d, plant_id == unique(d$plant_id)[1]), time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2")
-#' growth_defoliation(subset(d, treatment == "defoliated"), time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", total_loss="total_loss_g", leaf_mass_loss="leaf_mass_loss_g", leaf_area_loss="leaf_area_loss_m2", unit="plant_id")
-#' growth_defoliation(subset(d, treatment == "control"), time="day", total_mass="total_mass_g", leaf_mass="leaf_mass_g", leaf_area="leaf_area_m2", unit="plant_id", step=0.5)
+#' df <- growth_defoliation(d, time = "day", total_mass = "total_mass_g",
+#'                          leaf_mass = "leaf_mass_g", leaf_area = "leaf_area_m2",
+#'                          total_loss = "total_loss_g",
+#'                          leaf_mass_loss = "leaf_mass_loss_g",
+#'                          leaf_area_loss = "leaf_area_loss_m2",
+#'                          unit = "plant_id")
+#' head(df$parameters)
+#'
+#' # 2) From the declared object
+#' g <- growth_data(d, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "treatment",
+#'                  total_mass = "total_mass_g", leaf_mass = "leaf_mass_g",
+#'                  leaf_area = "leaf_area_m2")
+#' growth_defoliation(g, time = "day", total_mass = "total_mass_g",
+#'                    leaf_mass = "leaf_mass_g", leaf_area = "leaf_area_m2")
+#'
+#' # 3) Smaller integration step
+#' growth_defoliation(d, time = "day", total_mass = "total_mass_g",
+#'                    leaf_mass = "leaf_mass_g", leaf_area = "leaf_area_m2",
+#'                    unit = "plant_id", step = 0.1)$parameters[1, 1:3]
 growth_defoliation <- function(data, time, total_mass, leaf_mass, leaf_area,
                                total_loss = NULL, leaf_mass_loss = NULL, leaf_area_loss = NULL,
                                unit = NULL, step = 0.25) {
+  resolved <- .agf_resolve_data(data, time = time, total_mass = total_mass,
+                                leaf_mass = leaf_mass, leaf_area = leaf_area, unit = unit)
+  data <- resolved$data; time <- resolved$time; total_mass <- resolved$total_mass
+  leaf_mass <- resolved$leaf_mass; leaf_area <- resolved$leaf_area; unit <- resolved$unit
   .agf_assert_data_frame(data)
   for (nm in c(time, total_mass, leaf_mass, leaf_area)) .agf_assert_column(data, nm, nm, FALSE)
   for (nm in c(total_loss, leaf_mass_loss, leaf_area_loss, unit)) .agf_assert_column(data, nm, nm %||% "optional", TRUE)
@@ -464,10 +539,20 @@ growth_defoliation <- function(data, time, total_mass, leaf_mass, leaf_area,
 #' @export
 #'
 #' @examples
+#' # 1) Compensation on the final response
 #' d <- growth_example_data("bean_defoliation")
-#' growth_compensation(d, group="treatment", control="control", response="total_mass_g", time="day", unit="plant_id", metric="final")
-#' growth_compensation(d, group="treatment", control="control", response="total_mass_g", time="day", unit="plant_id", metric="auc")
-#' growth_compensation(d, group="treatment", control="control", response="leaf_area_m2", time="day", unit="plant_id", metric="slope")
+#' growth_compensation(d, group = "treatment", control = "control",
+#'                     response = "total_mass_g", time = "day", unit = "plant_id")
+#'
+#' # 2) Compensation on the area under the curve
+#' growth_compensation(d, group = "treatment", control = "control",
+#'                     response = "total_mass_g", time = "day", unit = "plant_id",
+#'                     metric = "auc")
+#'
+#' # 3) Compensation on the slope
+#' growth_compensation(d, group = "treatment", control = "control",
+#'                     response = "total_mass_g", time = "day", unit = "plant_id",
+#'                     metric = "slope")
 growth_compensation <- function(data, group, control, response, time = NULL, unit = NULL,
                                 metric = c("final", "auc", "slope")) {
   metric <- match.arg(metric)
@@ -515,10 +600,17 @@ growth_compensation <- function(data, group, control, response, time = NULL, uni
 #' @export
 #'
 #' @examples
+#' # 1) Density and per-plant mass analysis
 #' d <- growth_example_data("maize_density")
-#' growth_density(d, density="density_plants_m2", plant_mass="plant_mass_g")
-#' growth_density(subset(d, nitrogen == "high"), density="density_plants_m2", plant_mass="plant_mass_g")
-#' coef(growth_density(d, density="density_plants_m2", plant_mass="plant_mass_g")$fit)
+#' dn <- growth_density(d, density = "density_plants_m2",
+#'                      plant_mass = "plant_mass_g")
+#' class(dn)
+#'
+#' # 2) Structure of the result
+#' str(dn, max.level = 1)
+#'
+#' # 3) Printed summary
+#' print(dn)
 growth_density <- function(data, density, plant_mass) {
   .agf_assert_data_frame(data); .agf_assert_column(data, density, "density", FALSE); .agf_assert_column(data, plant_mass, "plant_mass", FALSE)
   d <- as.numeric(data[[density]]); w <- as.numeric(data[[plant_mass]])
@@ -542,10 +634,18 @@ growth_density <- function(data, density, plant_mass) {
 #' @export
 #'
 #' @examples
+#' # 1) Neighborhood index
 #' d <- growth_example_data("tree_competition")
-#' growth_neighbor(d, id="plant_id", x="x_m", y="y_m", size="size_cm", radius=3)
-#' growth_neighbor(d, id="plant_id", x="x_m", y="y_m", size="size_cm", radius=5, distance_power=2)
-#' growth_neighbor(d, id="plant_id", x="x_m", y="y_m", size="size_cm", radius=4, size_power=0)
+#' nb <- growth_neighbor(d, id = "plant_id", x = "x_m", y = "y_m", size = "size_cm")
+#' head(nb)
+#'
+#' # 2) Limited neighborhood radius
+#' head(growth_neighbor(d, id = "plant_id", x = "x_m", y = "y_m", size = "size_cm",
+#'                      radius = 5))
+#'
+#' # 3) Distance and size powers
+#' head(growth_neighbor(d, id = "plant_id", x = "x_m", y = "y_m", size = "size_cm",
+#'                      distance_power = 2, size_power = 0.5))
 growth_neighbor <- function(data, id, x, y, size, radius = Inf, distance_power = 1, size_power = 1) {
   .agf_assert_data_frame(data)
   for (nm in c(id, x, y, size)) .agf_assert_column(data, nm, nm, FALSE)
@@ -581,9 +681,20 @@ growth_neighbor <- function(data, id, x, y, size, radius = Inf, distance_power =
 #' @export
 #'
 #' @examples
-#' growth_competition(c(1,1), times=0:5, r=0.4, K=20, competition_matrix=matrix(c(0,.2,.2,0),2), dt=.1)
-#' growth_competition(c(1,2,1), times=0:4, r=c(.3,.4,.35), K=25, competition_matrix=matrix(0,3,3))
-#' growth_competition(c(2,2), times=c(0,1,2), r=.5, K=c(15,20), competition_matrix=matrix(c(0,.5,.1,0),2), dt=.05)
+#' # 1) Coupled logistic simulation
+#' cm <- growth_competition(initial_size = c(1, 1.5), times = seq(0, 60, by = 10),
+#'                          r = c(0.15, 0.12), K = c(100, 90),
+#'                          competition_matrix = matrix(c(1, 0.4, 0.3, 1), 2, 2))
+#' class(cm)
+#'
+#' # 2) Smaller integration step
+#' growth_competition(initial_size = c(1, 1.5), times = seq(0, 60, by = 10),
+#'                    r = c(0.15, 0.12), K = c(100, 90),
+#'                    competition_matrix = matrix(c(1, 0.4, 0.3, 1), 2, 2),
+#'                    dt = 0.05)$settings
+#'
+#' # 3) Printed summary
+#' print(cm)
 growth_competition <- function(initial_size, times, r, K, competition_matrix, dt = 0.1) {
   if (!is.numeric(initial_size) || any(!is.finite(initial_size)) || any(initial_size <= 0)) stop("`initial_size` must contain positive finite values.", call. = FALSE)
   n <- length(initial_size)
@@ -635,10 +746,18 @@ growth_competition <- function(initial_size, times, r, K, competition_matrix, dt
 #' @export
 #'
 #' @examples
-#' d <- growth_example_data("sunflower_sigmoid"); f <- growth_fit(subset(d,cultivar=="C1"),"logistic",time="day",response="biomass_g")
-#' growth_threshold(f, .5, type="fraction")
-#' growth_threshold(f, 100, type="absolute")
-#' growth_threshold(growth_diphasic(growth_example_data("coffee_diphasic"), time="day", response="biomass_g", n_start=2), .8, type="fraction")
+#' # 1) Threshold as a fraction of the asymptote
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' growth_threshold(f, 0.5, type = "fraction")
+#'
+#' # 2) Absolute threshold
+#' growth_threshold(f, 100, type = "absolute")
+#'
+#' # 3) Without a crossing the result has zero rows
+#' growth_threshold(f, 100, type = "absolute", direction = "decreasing")
+#' nrow(growth_threshold(f, 10000, type = "absolute"))
 growth_threshold <- function(object, threshold, type = c("absolute", "fraction"),
                              interval = NULL, direction = c("increasing", "decreasing"), n = 2001L) {
   n <- .agf_grid_n(n, min_n = 101L, name = "n")
@@ -658,8 +777,12 @@ growth_threshold <- function(object, threshold, type = c("absolute", "fraction")
     keep <- if (direction == "increasing") slopes >= 0 else slopes <= 0
     roots <- roots[keep]
   }
+  if (!length(roots)) {
+    return(data.frame(threshold = numeric(), type = character(), target_response = numeric(),
+                      time = numeric(), response = numeric(), stringsAsFactors = FALSE))
+  }
   data.frame(threshold = threshold, type = type, target_response = target,
-             time = roots, response = if (length(roots)) .agf_eval_growth_object(object, roots) else numeric(), stringsAsFactors = FALSE)
+             time = roots, response = .agf_eval_growth_object(object, roots), stringsAsFactors = FALSE)
 }
 
 #' Estimate the time of practical growth plateau
@@ -674,10 +797,18 @@ growth_threshold <- function(object, threshold, type = c("absolute", "fraction")
 #' @export
 #'
 #' @examples
-#' d <- growth_example_data("sunflower_sigmoid"); f <- growth_fit(subset(d,cultivar=="C1"),"logistic",time="day",response="biomass_g")
-#' growth_plateau_time(f, criterion="response")
-#' growth_plateau_time(f, criterion="rate", rate_fraction=.1)
-#' growth_plateau_time(growth_diphasic(growth_example_data("coffee_diphasic"), time="day", response="biomass_g", n_start=2), criterion="response", response_fraction=.9)
+#' # 1) Rate criterion
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' growth_plateau_time(f)
+#'
+#' # 2) Response criterion
+#' growth_plateau_time(f, criterion = "response", response_fraction = 0.9)
+#'
+#' # 3) Explicit grid and rate fraction
+#' growth_plateau_time(f, criterion = "rate", rate_fraction = 0.1,
+#'                     interval = c(0, 120), n = 501)
 growth_plateau_time <- function(object, criterion = c("rate", "response"), rate_fraction = 0.05,
                                 response_fraction = 0.95, interval = NULL, n = 3001L) {
   n <- .agf_grid_n(n, min_n = 101L, name = "n")
@@ -714,10 +845,19 @@ growth_plateau_time <- function(object, criterion = c("rate", "response"), rate_
 #' @export
 #'
 #' @examples
-#' d <- growth_example_data("sunflower_sigmoid"); f <- growth_fit(subset(d,cultivar=="C1"),"logistic",time="day",response="biomass_g")
-#' growth_harvest_opt(f, price=1, cost_per_time=.2)
-#' growth_harvest_opt(f, price=1, discount_rate=.01)
-#' growth_harvest_opt(growth_diphasic(growth_example_data("coffee_diphasic"),time="day",response="biomass_g",n_start=2), price=2, cost_per_time=.1)
+#' # 1) Optimum without costs
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' ho <- growth_harvest_opt(f)
+#' ho$optimum_time
+#'
+#' # 2) Optimum with economic assumptions
+#' growth_harvest_opt(f, price = 2, cost_per_time = 0.1, discount_rate = 0.02,
+#'                    harvest_cost = 5, interval = c(0, 120), n = 501)
+#'
+#' # 3) Assumptions stored in the object
+#' ho$assumptions
 growth_harvest_opt <- function(object, price = 1, cost_per_time = 0, discount_rate = 0,
                                harvest_cost = 0, interval = NULL, n = 2001L) {
   n <- .agf_grid_n(n, min_n = 101L, name = "n")
@@ -748,10 +888,17 @@ growth_harvest_opt <- function(object, price = 1, cost_per_time = 0, discount_ra
 #' @export
 #'
 #' @examples
-#' growth_schedule(time_range=c(0,100), n=6, method="equal")
-#' d <- growth_example_data("sunflower_sigmoid"); f <- growth_fit(subset(d,cultivar=="C1"),"logistic",time="day",response="biomass_g")
-#' growth_schedule(f, n=6)
-#' growth_schedule(f, time_range=c(0,80), n=8, method="rate_curvature")
+#' # 1) Schedule driven by rate curvature
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' growth_schedule(f, n = 6)
+#'
+#' # 2) Equal spacing
+#' growth_schedule(f, time_range = c(0, 100), n = 5, method = "equal")
+#'
+#' # 3) Without a fitted object
+#' growth_schedule(time_range = c(0, 100), n = 5)
 growth_schedule <- function(object = NULL, time_range = NULL, n = 6L,
                             method = c("rate_curvature", "equal"), grid_size = 2001L) {
   method <- match.arg(method)
@@ -792,9 +939,27 @@ growth_schedule <- function(object = NULL, time_range = NULL, n = 6L,
 #' @export
 #'
 #' @examples
-#' growth_design_sim("logistic", c(asym=100,mid=30,scale=8), times=seq(0,60,10), n_unit=6, sigma=3, seed=1)
-#' growth_design_sim("gompertz", c(asym=80,mid=25,scale=7), times=0:5*10, n_unit=4, sigma=2, random_asym_sd=.1, seed=2)
-#' growth_design_sim("logistic", c(asym=100,mid=30,scale=8), times=seq(0,60,10), n_unit=8, sigma=3, treatment=rep(c("C","T"),each=4), treatment_multiplier=c(C=1,T=1.15), seed=3)
+#' # 1) Simulated trial with a single logistic curve
+#' ds <- growth_design_sim(model = "logistic",
+#'                         parameters = list(asym = 100, mid = 40, scale = 10),
+#'                         times = c(10, 20, 30, 40, 50), n_unit = 6, sigma = 3,
+#'                         seed = 1)
+#' head(ds)
+#'
+#' # 2) Two treatments with a multiplicative effect
+#' ds2 <- growth_design_sim(model = "logistic",
+#'                          parameters = list(asym = 100, mid = 40, scale = 10),
+#'                          times = c(10, 20, 30, 40, 50), n_unit = 6, sigma = 3,
+#'                          treatment = rep(c("A", "B"), each = 3),
+#'                          treatment_multiplier = c(A = 1, B = 1.3), seed = 1)
+#' unique(ds2$treatment)
+#'
+#' # 3) Between-unit heterogeneity
+#' ds3 <- growth_design_sim(model = "logistic",
+#'                          parameters = list(asym = 100, mid = 40, scale = 10),
+#'                          times = c(10, 20, 30, 40, 50), n_unit = 8, sigma = 2,
+#'                          random_asym_sd = 0.2, seed = 1)
+#' tapply(ds3$expected[ds3$time == 50], ds3$unit[ds3$time == 50], unique)
 growth_design_sim <- function(model, parameters, times, n_unit = 12L, sigma = 1,
                               random_asym_sd = 0, treatment = NULL, treatment_multiplier = NULL,
                               seed = NULL) {
@@ -802,7 +967,10 @@ growth_design_sim <- function(model, parameters, times, n_unit = 12L, sigma = 1,
   times <- sort(unique(as.numeric(times))); n_unit <- as.integer(n_unit)
   if (n_unit < 1L || length(times) < 2L || any(!is.finite(times))) stop("`n_unit` must be positive and `times` must contain at least two finite values.", call. = FALSE)
   if (!is.numeric(sigma) || sigma < 0 || !is.finite(sigma) || !is.numeric(random_asym_sd) || random_asym_sd < 0) stop("`sigma` and `random_asym_sd` must be non-negative.", call. = FALSE)
-  if (!is.null(seed)) set.seed(seed)
+  if (!is.null(seed)) {
+    .agf_restore_rng <- .agf_seed_snapshot(); on.exit(.agf_restore_rng(), add = TRUE)
+    set.seed(seed)
+  }
   if (is.null(treatment)) treatment <- rep("all", n_unit)
   if (length(treatment) != n_unit) stop("`treatment` must have length `n_unit`.", call. = FALSE)
   rows <- vector("list", n_unit)
@@ -844,9 +1012,16 @@ growth_design_sim <- function(model, parameters, times, n_unit = 12L, sigma = 1,
 #' @export
 #'
 #' @examples
-#' growth_power(effect=5, trait_sd=8, n_unit=20, n_sim=500, seed=1)
-#' growth_power(effect=5, trait_sd=8, n_unit=40, n_sim=500, seed=1)
-#' growth_power(effect=8, trait_sd=8, n_unit=20, n_sim=500, alternative="greater", seed=2)
+#' # 1) Power for one effect and sample size
+#' growth_power(effect = 0.5, trait_sd = 1, n_unit = 10, n_sim = 500, seed = 1)
+#'
+#' # 2) One-sided alternative
+#' growth_power(effect = 0.5, trait_sd = 1, n_unit = 10, n_sim = 500,
+#'              alternative = "greater", seed = 1)$power
+#'
+#' # 3) A grid of sample sizes
+#' sapply(c(6, 10, 16), function(n)
+#'   growth_power(0.5, 1, n_unit = n, n_sim = 500, seed = 1)$power)
 growth_power <- function(effect, trait_sd, n_unit, alpha = 0.05, n_sim = 5000L,
                          alternative = c("two.sided", "greater", "less"), seed = NULL) {
   alternative <- match.arg(alternative); n_unit <- as.integer(n_unit); n_sim <- as.integer(n_sim)
@@ -854,7 +1029,10 @@ growth_power <- function(effect, trait_sd, n_unit, alpha = 0.05, n_sim = 5000L,
   if (!is.numeric(trait_sd) || length(trait_sd)!=1L || !is.finite(trait_sd) || trait_sd <= 0) stop("`trait_sd` must be positive.", call. = FALSE)
   if (n_unit < 2L || n_sim < 100L) stop("Use at least two units per group and at least 100 simulations.", call. = FALSE)
   if (!is.numeric(alpha) || alpha <= 0 || alpha >= 1) stop("`alpha` must lie between 0 and 1.", call. = FALSE)
-  if (!is.null(seed)) set.seed(seed)
+  if (!is.null(seed)) {
+    .agf_restore_rng <- .agf_seed_snapshot(); on.exit(.agf_restore_rng(), add = TRUE)
+    set.seed(seed)
+  }
   hit <- logical(n_sim); estimates <- numeric(n_sim)
   for (i in seq_len(n_sim)) {
     c0 <- stats::rnorm(n_unit, 0, trait_sd); tr <- stats::rnorm(n_unit, effect, trait_sd)
@@ -868,6 +1046,19 @@ growth_power <- function(effect, trait_sd, n_unit, alpha = 0.05, n_sim = 5000L,
 }
 
 #' @export
+#' @examples
+#' # 1) Multiphase fit summary
+#' d <- growth_example_data("coffee_diphasic")
+#' g <- growth_data(d, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", total_mass = "biomass_g")
+#' mp <- growth_multiphase(g, n_phases = 2, n_start = 2, seed = 1)
+#' print(mp)
+#'
+#' # 2) Components
+#' mp$components
+#'
+#' # 3) Invisible return
+#' identical(print(mp), mp)
 print.agri_growth_multiphase <- function(x, ...) {
   cat("<agri_growth_multiphase>", x$n_phases, "phase(s)\n")
   print(x$components, row.names = FALSE)
@@ -876,6 +1067,20 @@ print.agri_growth_multiphase <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) Multiphase collection by group
+#' d <- growth_example_data("coffee_diphasic")
+#' g <- growth_data(d, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "treatment",
+#'                  total_mass = "biomass_g")
+#' mc <- growth_multiphase(g, n_phases = 2, group = "treatment", n_start = 2, seed = 1)
+#' print(mc)
+#'
+#' # 2) Group names
+#' names(mc$fits)
+#'
+#' # 3) Invisible return
+#' identical(print(mc), mc)
 print.agri_growth_multiphase_collection <- function(x, ...) {
   cat("<agri_growth_multiphase_collection> group:", x$group, " phases:", x$n_phases, "\n")
   cat("Groups:", paste(x$groups, collapse=", "), "\n")
@@ -883,6 +1088,17 @@ print.agri_growth_multiphase_collection <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) Changepoint summary
+#' d <- growth_example_data("coffee_diphasic")
+#' cp <- growth_changepoint(d, time = "day", response = "biomass_g")
+#' print(cp)
+#'
+#' # 2) Slopes before and after
+#' c(before = cp$slope_before, after = cp$slope_after)
+#'
+#' # 3) Invisible return
+#' identical(print(cp), cp)
 print.agri_growth_changepoint <- function(x, ...) {
   cat("<agri_growth_changepoint> breakpoint:", .agf_fmt(x$breakpoint), "\n")
   cat("Slope before:", .agf_fmt(x$slope_before), " slope after:", .agf_fmt(x$slope_after), "\n")
@@ -890,12 +1106,36 @@ print.agri_growth_changepoint <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) Event summary
+#' d <- growth_example_data("bean_defoliation")
+#' ev <- growth_event(d, time = "day", response = "total_mass_g", event_time = 30)
+#' print(ev)
+#'
+#' # 2) Columns created by the event
+#' head(ev$data[, c("day", ".event_centered_time", ".post_event")])
+#'
+#' # 3) Invisible return
+#' identical(print(ev), ev)
 print.agri_growth_event <- function(x, ...) {
   cat("<agri_growth_event>", x$event_type, "at time", .agf_fmt(x$event_time), "\n")
   invisible(x)
 }
 
 #' @export
+#' @examples
+#' # 1) Defoliation summary
+#' d <- growth_example_data("bean_defoliation")
+#' df <- growth_defoliation(d, time = "day", total_mass = "total_mass_g",
+#'                          leaf_mass = "leaf_mass_g", leaf_area = "leaf_area_m2",
+#'                          unit = "plant_id")
+#' print(df)
+#'
+#' # 2) Parameter table
+#' head(df$parameters)
+#'
+#' # 3) Invisible return
+#' identical(print(df), df)
 print.agri_growth_defoliation <- function(x, ...) {
   cat("<agri_growth_defoliation>", nrow(x$parameters), "fitted unit(s)\n")
   print(x$parameters, row.names=FALSE)
@@ -903,6 +1143,17 @@ print.agri_growth_defoliation <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) Density analysis summary
+#' d <- growth_example_data("maize_density")
+#' dn <- growth_density(d, density = "density_plants_m2", plant_mass = "plant_mass_g")
+#' print(dn)
+#'
+#' # 2) Structure
+#' str(dn, max.level = 1)
+#'
+#' # 3) Invisible return
+#' identical(print(dn), dn)
 print.agri_growth_density <- function(x, ...) {
   cat("<agri_growth_density> reciprocal size-density model\n")
   print(summary(x$fit)$coefficients)
@@ -910,18 +1161,53 @@ print.agri_growth_density <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) Simulation summary
+#' cm <- growth_competition(initial_size = c(1, 1.5), times = seq(0, 60, by = 10),
+#'                          r = c(0.15, 0.12), K = c(100, 90),
+#'                          competition_matrix = matrix(c(1, 0.4, 0.3, 1), 2, 2))
+#' print(cm)
+#'
+#' # 2) Structure
+#' str(cm, max.level = 1)
+#'
+#' # 3) Invisible return
+#' identical(print(cm), cm)
 print.agri_growth_competition <- function(x, ...) {
   cat("<agri_growth_competition>", length(x$initial_size), "plants;", length(unique(x$trajectory$time)), "output times\n")
   invisible(x)
 }
 
 #' @export
+#' @examples
+#' # 1) Harvest optimum summary
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' print(growth_harvest_opt(f))
+#'
+#' # 2) Net-value curve
+#' head(growth_harvest_opt(f)$curve)
+#'
+#' # 3) Invisible return
+#' ho <- growth_harvest_opt(f)
+#' identical(print(ho), ho)
 print.agri_growth_harvest <- function(x, ...) {
   cat("<agri_growth_harvest> optimum time:", .agf_fmt(x$optimum_time), " response:", .agf_fmt(x$response), " net value:", .agf_fmt(x$net_value), "\n")
   invisible(x)
 }
 
 #' @export
+#' @examples
+#' # 1) Power calculation summary
+#' pw <- growth_power(effect = 0.5, trait_sd = 1, n_unit = 10, n_sim = 500, seed = 1)
+#' print(pw)
+#'
+#' # 2) Structure
+#' str(pw, max.level = 1)
+#'
+#' # 3) Invisible return
+#' identical(print(pw), pw)
 print.agri_growth_power <- function(x, ...) {
   cat("<agri_growth_power> power:", .agf_fmt(x$power), " Monte Carlo SE:", .agf_fmt(x$monte_carlo_se), "\n")
   invisible(x)

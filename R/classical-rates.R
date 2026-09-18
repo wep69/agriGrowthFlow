@@ -31,6 +31,16 @@ NULL
 
 #' @rdname classical_growth_rates
 #' @export
+#' @examples
+#' # 1) One interval
+#' growth_agr(w1 = 10, w2 = 25, t1 = 14, t2 = 28)
+#'
+#' # 2) Several intervals at once
+#' growth_agr(c(10, 25, 60), c(25, 60, 110), c(14, 28, 42), c(28, 42, 56))
+#'
+#' # 3) Columns of a data frame
+#' d <- data.frame(w1 = c(5, 8), w2 = c(9, 20), t1 = c(0, 7), t2 = c(7, 14))
+#' with(d, growth_agr(w1, w2, t1, t2))
 growth_agr <- function(w1, w2, t1, t2) {
   .agf_assert_numeric(w1, "w1")
   .agf_assert_numeric(w2, "w2")
@@ -44,6 +54,15 @@ growth_agr <- function(w1, w2, t1, t2) {
 
 #' @rdname classical_growth_rates
 #' @export
+#' @examples
+#' # 1) One interval
+#' growth_rgr(w1 = 10, w2 = 25, t1 = 14, t2 = 28)
+#'
+#' # 2) A mass loss gives a negative rate
+#' growth_rgr(w1 = 25, w2 = 10, t1 = 14, t2 = 28)
+#'
+#' # 3) Vectorized
+#' growth_rgr(c(10, 25), c(25, 60), c(14, 28), c(28, 42))
 growth_rgr <- function(w1, w2, t1, t2) {
   .agf_assert_numeric(w1, "w1")
   .agf_assert_numeric(w2, "w2")
@@ -58,6 +77,15 @@ growth_rgr <- function(w1, w2, t1, t2) {
 
 #' @rdname classical_growth_rates
 #' @export
+#' @examples
+#' # 1) One interval with unequal leaf areas
+#' growth_nar(w1 = 10, w2 = 25, a1 = 2, a2 = 5, t1 = 14, t2 = 28)
+#'
+#' # 2) Equal areas use the continuous limit
+#' growth_nar(w1 = 10, w2 = 25, a1 = 3, a2 = 3, t1 = 14, t2 = 28)
+#'
+#' # 3) Tolerance for near-equality
+#' growth_nar(10, 25, 3, 3 + 1e-10, 14, 28, tolerance = 1e-6)
 growth_nar <- function(w1, w2, a1, a2, t1, t2, tolerance = sqrt(.Machine$double.eps)) {
   .agf_assert_numeric(w1, "w1")
   .agf_assert_numeric(w2, "w2")
@@ -76,6 +104,16 @@ growth_nar <- function(w1, w2, a1, a2, t1, t2, tolerance = sqrt(.Machine$double.
 
 #' @rdname classical_growth_rates
 #' @export
+#' @examples
+#' # 1) Leaf area ratio
+#' growth_lar(leaf_area = 0.5, total_mass = 25)
+#'
+#' # 2) Vectorized
+#' growth_lar(c(0.5, 0.9), c(25, 40))
+#'
+#' # 3) Columns of a data frame
+#' d <- data.frame(area = c(0.5, 0.9), mass = c(25, 40))
+#' with(d, growth_lar(area, mass))
 growth_lar <- function(leaf_area, total_mass) {
   .agf_assert_numeric(leaf_area, "leaf_area")
   .agf_assert_numeric(total_mass, "total_mass")
@@ -86,6 +124,15 @@ growth_lar <- function(leaf_area, total_mass) {
 
 #' @rdname classical_growth_rates
 #' @export
+#' @examples
+#' # 1) Specific leaf area
+#' growth_sla(leaf_area = 0.5, leaf_mass = 10)
+#'
+#' # 2) Vectorized
+#' growth_sla(c(0.5, 0.8), c(10, 12))
+#'
+#' # 3) Invalid input
+#' try(growth_sla(leaf_area = -0.5, leaf_mass = 10))
 growth_sla <- function(leaf_area, leaf_mass) {
   .agf_assert_numeric(leaf_area, "leaf_area")
   .agf_assert_numeric(leaf_mass, "leaf_mass")
@@ -96,6 +143,17 @@ growth_sla <- function(leaf_area, leaf_mass) {
 
 #' @rdname classical_growth_rates
 #' @export
+#' @examples
+#' # 1) Leaf mass ratio
+#' growth_lmr(leaf_mass = 10, total_mass = 25)
+#'
+#' # 2) Vectorized
+#' growth_lmr(c(10, 18), c(25, 40))
+#'
+#' # 3) The identity LAR = SLA x LMR
+#' sla <- growth_sla(leaf_area = 0.5, leaf_mass = 10)
+#' lmr <- growth_lmr(leaf_mass = 10, total_mass = 25)
+#' c(sla = sla, lmr = lmr, product = sla * lmr, lar = growth_lar(0.5, 25))
 growth_lmr <- function(leaf_mass, total_mass) {
   .agf_assert_numeric(leaf_mass, "leaf_mass")
   .agf_assert_numeric(total_mass, "total_mass")
@@ -106,6 +164,15 @@ growth_lmr <- function(leaf_mass, total_mass) {
 
 #' @rdname classical_growth_rates
 #' @export
+#' @examples
+#' # 1) Leaf area index
+#' growth_lai(leaf_area = 0.5, ground_area = 0.25)
+#'
+#' # 2) Vectorized
+#' growth_lai(c(0.5, 1.0, 2.0), ground_area = 0.25)
+#'
+#' # 3) Invalid ground area
+#' try(growth_lai(leaf_area = 0.5, ground_area = 0))
 growth_lai <- function(leaf_area, ground_area) {
   .agf_assert_numeric(leaf_area, "leaf_area")
   .agf_assert_numeric(ground_area, "ground_area")
@@ -116,6 +183,15 @@ growth_lai <- function(leaf_area, ground_area) {
 
 #' @rdname classical_growth_rates
 #' @export
+#' @examples
+#' # 1) Unit ground area
+#' growth_cgr(10, 25, 14, 28)
+#'
+#' # 2) Declared ground area
+#' growth_cgr(10, 25, 14, 28, ground_area = 0.25)
+#'
+#' # 3) Vectorized
+#' growth_cgr(c(10, 25), c(25, 60), c(14, 28), c(28, 42), ground_area = 0.5)
 growth_cgr <- function(w1, w2, t1, t2, ground_area = 1) {
   .agf_assert_numeric(w1, "w1")
   .agf_assert_numeric(w2, "w2")
@@ -138,7 +214,16 @@ growth_cgr <- function(w1, w2, t1, t2, ground_area = 1) {
 #' @export
 #'
 #' @examples
-#' growth_lad(c(0.5, 1.0, 1.2), c(0, 5, 10))
+#' # 1) Total leaf area duration
+#' growth_lad(lai = c(0.5, 1.2, 2.5, 3.1), time = c(14, 28, 42, 56))
+#'
+#' # 2) Interval-by-interval table
+#' growth_lad(lai = c(0.5, 1.2, 2.5, 3.1), time = c(14, 28, 42, 56),
+#'            intervals = TRUE)
+#'
+#' # 3) Handling gaps
+#' growth_lad(lai = c(0.5, NA, 2.5), time = c(14, 28, 42), na.rm = TRUE)
+#' growth_lad(lai = c(0.5, NA, 2.5), time = c(14, 28, 42), na.rm = FALSE)
 
 growth_lad <- function(lai, time, intervals = FALSE, na.rm = FALSE) {
   .agf_assert_numeric(lai, "lai")

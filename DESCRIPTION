@@ -1,7 +1,7 @@
 Package: agriGrowthFlow
 Type: Package
 Title: Design-Aware Plant Growth and Longitudinal Trajectory Analysis
-Version: 1.0.0
+Version: 1.0.1
 Authors@R: c(
     person("Walter Esfrain", "Pereira", email = "wep@cca.ufpb.br", role = c("aut", "cre", "cph"),
            comment = c(ORCID = "0000-0003-1085-0191")),

@@ -87,12 +87,17 @@
 #' @export
 #'
 #' @examples
+#' # 1) Prediction on the observed grid
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' f <- growth_fit(d, "logistic", time = "day", response = "biomass_g")
-#' growth_predict(f)
-#' growth_predict(f, time = seq(10, 80, by = 10), interval = "confidence")
-#' growth_predict(f, time = seq(10, 80, by = 10), interval = "prediction")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' head(growth_predict(f))
+#'
+#' # 2) Confidence interval
+#' growth_predict(f, time = c(20, 40, 60), interval = "confidence", level = 0.90)
+#'
+#' # 3) Prediction interval
+#' growth_predict(f, time = c(20, 40, 60), interval = "prediction")
 growth_predict <- function(object, time = NULL,
                            interval = c("none", "confidence", "prediction"),
                            level = 0.95) {
@@ -152,12 +157,21 @@ growth_predict <- function(object, time = NULL,
 #' @export
 #'
 #' @examples
+#' # 1) Two models on the same prepared observations
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' s <- growth_fit(d, c("logistic", "gompertz"), time = "day", response = "biomass_g")
-#' growth_compare(s)
-#' growth_compare(s$fits$logistic, s$fits$gompertz)
-#' subset(growth_compare(s), delta_aicc < 2)
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f1 <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' f2 <- growth_fit(d1, "gompertz", time = "day", response = "biomass_g")
+#' growth_compare(f1, f2)[, c("model", "aicc", "delta_aicc", "akaike_weight")]
+#'
+#' # 2) Three models
+#' f3 <- growth_fit(d1, "richards", time = "day", response = "biomass_g")
+#' growth_compare(f1, f2, f3)$model
+#'
+#' # 3) Comparison inside a collection by group
+#' fc <- growth_fit(d, c("logistic", "gompertz"), time = "day",
+#'                  response = "biomass_g", group = "cultivar")
+#' growth_compare(fc$fits[[1]]$fits[[1]], fc$fits[[1]]$fits[[2]])
 growth_compare <- function(...) {
   fits <- .agf_collect_compare_fits(...)
   if (length(fits) < 2L) warning("Model comparison is most informative with at least two candidate fits.", call. = FALSE)
@@ -204,6 +218,20 @@ growth_compare <- function(...) {
 }
 
 #' @export
+#' @examples
+#' # 1) Comparison table
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f1 <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' f2 <- growth_fit(d1, "gompertz", time = "day", response = "biomass_g")
+#' cmp <- growth_compare(f1, f2)
+#' print(cmp)
+#'
+#' # 2) Best model by AICc
+#' cmp$model[which.min(cmp$aicc)]
+#'
+#' # 3) Invisible return
+#' identical(print(cmp), cmp)
 print.agri_growth_comparison <- function(x, ...) {
   cat("<agri_growth_comparison> same prepared observations\n")
   print.data.frame(x, row.names = FALSE)
@@ -211,6 +239,19 @@ print.agri_growth_comparison <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) Fitted curve over the data
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' p <- plot(f)
+#' class(p)[1]
+#'
+#' # 2) With a confidence band
+#' class(plot(f, interval = "confidence", level = 0.90, n = 50))[1]
+#'
+#' # 3) The returned object is an editable ggplot
+#' p + ggplot2::labs(title = "Fitted curve")
 plot.agri_growth_fit <- function(x, ..., interval = c("confidence", "prediction", "none"),
                                  level = 0.95, n = 200L) {
   .agf_require_ggplot2()

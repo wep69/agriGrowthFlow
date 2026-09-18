@@ -53,10 +53,19 @@
 #' @return An `agri_growth_smooth` or `agri_growth_smooth_collection`.
 #' @export
 #' @examples
-#' d <- growth_example_data("bean_repeated")
-#' growth_smooth(d, time="day", response="height_cm", group="water_regime", method="smooth_spline")
-#' growth_smooth(d, time="day", response="projected_leaf_area_m2", group="water_regime", method="loess")
-#' growth_smooth(d, time="day", response="spad", method="smooth_spline", cv=TRUE)
+#' # 1) Smoothing spline
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' sm <- growth_smooth(g, response = "height_cm")
+#' sm$method
+#'
+#' # 2) LOESS with a smaller span
+#' growth_smooth(g, response = "height_cm", method = "loess", span = 0.5)$method
+#'
+#' # 3) Monotonically increasing SCAM
+#' growth_smooth(g, response = "height_cm", method = "scam",
+#'               constraint = "increasing")$constraint
 growth_smooth <- function(x,
                           time = NULL,
                           response = NULL,
@@ -141,11 +150,18 @@ growth_smooth <- function(x,
 #' @return A data frame.
 #' @export
 #' @examples
-#' d <- growth_example_data("bean_repeated")
-#' s <- growth_smooth(d, time="day", response="height_cm", group="water_regime")
-#' growth_smooth_predict(s, n=50)
-#' growth_smooth_predict(s, time=seq(0,60,by=5))
-#' growth_smooth_predict(growth_smooth(d, time="day", response="spad"), n=25)
+#' # 1) Prediction on an explicit grid
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' sm <- growth_smooth(g, response = "height_cm")
+#' growth_smooth_predict(sm, time = c(10, 20, 30, 40))
+#'
+#' # 2) Default grid with n points
+#' nrow(growth_smooth_predict(sm, n = 50))
+#'
+#' # 3) Predictions outside the support are flagged
+#' growth_smooth_predict(sm, time = c(1, 20, 60))$inside_support
 growth_smooth_predict <- function(object, time = NULL, n = 100L) {
   if (inherits(object, "agri_growth_smooth_collection")) {
     ans <- lapply(object$fits, growth_smooth_predict, time = time, n = n)
@@ -190,11 +206,19 @@ growth_smooth_predict <- function(object, time = NULL, n = 100L) {
 #' @return A data frame with time, fitted response and derivative.
 #' @export
 #' @examples
-#' d <- growth_example_data("bean_repeated")
-#' s <- growth_smooth(d, time="day", response="height_cm", group="water_regime")
-#' growth_derivative(s, order=1, n=40)
-#' growth_derivative(s, order=2, n=40)
-#' growth_derivative(growth_smooth(d, time="day", response="spad"), time=seq(0,60,by=5))
+#' # 1) First derivative
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' sm <- growth_smooth(g, response = "height_cm")
+#' dv <- growth_derivative(sm, order = 1)
+#' head(dv)
+#'
+#' # 2) Second derivative
+#' nrow(growth_derivative(sm, order = 2))
+#'
+#' # 3) Explicit time grid
+#' growth_derivative(sm, order = 1, time = c(10, 20, 30))
 growth_derivative <- function(object, order = 1L, time = NULL, n = 100L, eps = 1e-4) {
   order <- as.integer(order)
   if (!order %in% c(1L, 2L)) stop("`order` must be 1 or 2.", call. = FALSE)
@@ -223,11 +247,19 @@ growth_derivative <- function(object, order = 1L, time = NULL, n = 100L, eps = 1
 #' @return A second-derivative data frame.
 #' @export
 #' @examples
-#' d <- growth_example_data("bean_repeated")
-#' s <- growth_smooth(d, time="day", response="height_cm")
-#' growth_acceleration(s, n=40)
-#' growth_acceleration(s, time=seq(0,60,by=5))
-#' growth_acceleration(growth_smooth(d, time="day", response="projected_leaf_area_m2"), n=30)
+#' # 1) Acceleration along the support
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' sm <- growth_smooth(g, response = "height_cm")
+#' ac <- growth_acceleration(sm)
+#' head(ac)
+#'
+#' # 2) More points and a smaller step
+#' nrow(growth_acceleration(sm, n = 30, eps = 1e-6))
+#'
+#' # 3) Explicit grid
+#' growth_acceleration(sm, time = c(15, 25, 35))
 growth_acceleration <- function(object, time = NULL, n = 100L, eps = 1e-4) {
   growth_derivative(object, order = 2L, time = time, n = n, eps = eps)
 }
@@ -238,11 +270,19 @@ growth_acceleration <- function(object, time = NULL, n = 100L, eps = 1e-4) {
 #' @return A data frame with maximum rate, peak response, and approximate inflection times.
 #' @export
 #' @examples
-#' d <- growth_example_data("bean_repeated")
-#' s <- growth_smooth(d, time="day", response="height_cm", group="water_regime")
-#' growth_smooth_traits(s)
-#' growth_smooth_traits(growth_smooth(d, time="day", response="projected_leaf_area_m2"), n=200)
-#' growth_smooth_traits(growth_smooth(d, time="day", response="spad", method="loess"), n=150)
+#' # 1) Traits of the smoothed curve
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' sm <- growth_smooth(g, response = "height_cm")
+#' growth_smooth_traits(sm)
+#'
+#' # 2) More points on the internal grid
+#' growth_smooth_traits(sm, n = 400)$peak_response
+#'
+#' # 3) Traits by group
+#' sg <- growth_smooth(g, response = "height_cm", group = "water_regime")
+#' growth_smooth_traits(sg)[, c("group", "maximum_growth_rate")]
 growth_smooth_traits <- function(object, n = 400L) {
   if (inherits(object, "agri_growth_smooth_collection")) {
     out <- do.call(rbind, lapply(object$fits, growth_smooth_traits, n = n))
@@ -270,6 +310,19 @@ growth_smooth_traits <- function(object, n = 400L) {
 }
 
 #' @export
+#' @examples
+#' # 1) Smoother summary
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' sm <- growth_smooth(g, response = "height_cm")
+#' print(sm)
+#'
+#' # 2) Structure
+#' str(sm, max.level = 1)
+#'
+#' # 3) Invisible return
+#' identical(print(sm), sm)
 print.agri_growth_smooth <- function(x, ...) {
   cat("<agri_growth_smooth> method:", x$method, " group:", x$group, "\n")
   cat("Time support:", paste(.agf_fmt(x$time_support), collapse = " to "), " Population mean:", x$population, "\n")
@@ -278,6 +331,19 @@ print.agri_growth_smooth <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) A collection by group
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' sg <- growth_smooth(g, response = "height_cm", group = "water_regime")
+#' print(sg)
+#'
+#' # 2) Group names
+#' names(sg$fits)
+#'
+#' # 3) Invisible return
+#' identical(print(sg), sg)
 print.agri_growth_smooth_collection <- function(x, ...) {
   cat("<agri_growth_smooth_collection> method:", x$method, " groups:", paste(x$groups, collapse = ", "), "\n")
   invisible(x)

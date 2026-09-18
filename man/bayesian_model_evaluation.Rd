@@ -46,8 +46,234 @@ For \code{type = "epred"} or \code{"predict"}, the package forms a Monte Carlo m
 \code{growth_loo()} returns \code{agri_growth_loo}. \code{growth_model_average()} returns \code{agri_growth_model_average} with weights, LOO objects, and optional prediction summaries and mixture draws.
 }
 \examples{
-d <- growth_example_data("sunflower_sigmoid")
-growth_prior(d, "logistic", time = "day", response = "biomass_g")
-growth_prior(d, "gompertz", time = "day", response = "biomass_g")
-if (FALSE) growth_model_average(NULL, NULL)
+
+## growth_loo()
+# 1) Leave-one-out evaluation
+\donttest{
+if (requireNamespace("brms", quietly = TRUE) && requireNamespace("loo", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  growth_loo(b)
+}
+}
+
+# 2) Moment matching for problematic Pareto-k
+\donttest{
+if (requireNamespace("brms", quietly = TRUE) && requireNamespace("loo", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  growth_loo(b, moment_match = TRUE)
+}
+}
+
+# 3) Structure of the result
+\donttest{
+if (requireNamespace("brms", quietly = TRUE) && requireNamespace("loo", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  str(growth_loo(b), max.level = 1)
+}
+}
+
+## growth_model_average()
+# 1) Model averaging by stacking
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b1 <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  b2 <- growth_bayes(d1, "gompertz", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  growth_model_average(b1, b2, ndraws = 50, seed = 2)
+}
+}
+
+# 2) Pseudo-BMA weights
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b1 <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  b2 <- growth_bayes(d1, "gompertz", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  growth_model_average(b1, b2, method = "pseudobma", ndraws = 50, seed = 2)$weights
+}
+}
+
+# 3) Averaged prediction from the ensemble
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b1 <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  b2 <- growth_bayes(d1, "gompertz", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  ma <- growth_model_average(b1, b2, type = "epred", ndraws = 50, seed = 2)
+  class(ma)
+}
+}
+
+## print.agri_growth_bayes_diagnostics()
+# 1) Printed diagnostics
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  print(growth_bayes_diagnose(b))
+}
+}
+
+# 2) Structure
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  str(growth_bayes_diagnose(b), max.level = 1)
+}
+}
+
+# 3) Invisible return
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  bd <- growth_bayes_diagnose(b)
+  identical(print(bd), bd)
+}
+}
+
+## print.agri_growth_loo()
+# 1) LOO summary
+\donttest{
+if (requireNamespace("brms", quietly = TRUE) && requireNamespace("loo", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  print(growth_loo(b))
+}
+}
+
+# 2) Structure
+\donttest{
+if (requireNamespace("brms", quietly = TRUE) && requireNamespace("loo", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  str(growth_loo(b), max.level = 1)
+}
+}
+
+# 3) Invisible return
+\donttest{
+if (requireNamespace("brms", quietly = TRUE) && requireNamespace("loo", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  l <- growth_loo(b)
+  identical(print(l), l)
+}
+}
+
+## print.agri_growth_model_average()
+# 1) Model-averaging summary
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b1 <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  b2 <- growth_bayes(d1, "gompertz", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  ma <- growth_model_average(b1, b2, ndraws = 50, seed = 2)
+  print(ma)
+}
+}
+
+# 2) Structure
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b1 <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  b2 <- growth_bayes(d1, "gompertz", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  ma <- growth_model_average(b1, b2, ndraws = 50, seed = 2)
+  str(ma, max.level = 1)
+}
+}
+
+# 3) Invisible return
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b1 <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  b2 <- growth_bayes(d1, "gompertz", time = "day", response = "biomass_g",
+                     group_effects = "none", random = "none",
+                     chains = 1, iter = 200, warmup = 100, cores = 1,
+                     seed = 1, refresh = 0)
+  ma <- growth_model_average(b1, b2, ndraws = 50, seed = 2)
+  identical(print(ma), ma)
+}
+}
 }

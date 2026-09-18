@@ -110,19 +110,156 @@ fitting. RDS is the preferred complete archival format because flat files cannot
 preserve nested fitted-model objects.
 }
 \examples{
-\dontrun{
-d <- growth_example_data("sunflower_sigmoid")
-plan <- growth_workflow(d, time = "day", response = "biomass_g", execute = FALSE)
+
+## growth_method_guide()
+# 1) Trajectory objective
+d <- growth_example_data("maize_destructive")
+g <- growth_data(d, time = "day", sampling = "destructive",
+                 experimental_unit = "plot_id", treatment = "nitrogen",
+                 block = "block", total_mass = "total_mass_g",
+                 leaf_area = "leaf_area_m2", leaf_mass = "leaf_mass_g")
+gu <- growth_method_guide(g, objective = "trajectory")
+gu[, c("method", "priority")]
+
+# 2) Another objective
+growth_method_guide(g, objective = "treatment_comparison")$method
+
+# 3) Without optional methods
+growth_method_guide(g, objective = "rates", include_optional = FALSE)$method
+
+## growth_workflow()
+# 1) Analysis contract without execution
+d <- growth_example_data("maize_destructive")
+g <- growth_data(d, time = "day", sampling = "destructive",
+                 experimental_unit = "plot_id", treatment = "nitrogen",
+                 block = "block", total_mass = "total_mass_g")
+plan <- growth_workflow(g, objective = "trajectory", execute = FALSE, seed = 1)
+plan$executed
+
+# 2) Explicit execution with a declared strategy
+w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+                     models = "logistic", seed = 1)
+w$selected_strategy
+
+# 3) With a bootstrap uncertainty layer
+growth_workflow(g, objective = "uncertainty", strategy = "parametric",
+                models = "logistic", uncertainty = "bootstrap",
+                bootstrap_R = 25, seed = 1)$uncertainty_method
+
+## growth_workflow_audit()
+# 1) Audit of an analysis contract
+d <- growth_example_data("maize_destructive")
+g <- growth_data(d, time = "day", sampling = "destructive",
+                 experimental_unit = "plot_id", total_mass = "total_mass_g")
+plan <- growth_workflow(g, objective = "trajectory", execute = FALSE, seed = 1)
 growth_workflow_audit(plan)
 
-fit <- growth_workflow(
-  d, time = "day", response = "biomass_g",
-  strategy = "parametric", models = c("logistic", "gompertz"),
-  n_start = 3, seed = 1
-)
-growth_table(fit, "traits")
-growth_report(fit)
+# 2) Audit of an executed workflow
+w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+                     models = "logistic", seed = 1)
+growth_workflow_audit(w)$status
 
-growth_export(fit, tempfile(pattern = "agf_bundle_"), format = "bundle")
-}
+# 3) Gates that did not pass
+aud <- growth_workflow_audit(plan)
+aud[aud$status != "PASS", c("gate", "status")]
+
+## growth_table()
+# 1) Audit table of a workflow
+d <- growth_example_data("maize_destructive")
+g <- growth_data(d, time = "day", sampling = "destructive",
+                 experimental_unit = "plot_id", total_mass = "total_mass_g")
+w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+                     models = "logistic", seed = 1)
+growth_table(w, component = "audit")
+
+# 2) Coefficients of a fit
+f <- growth_fit(g, "logistic", time = "day", response = "total_mass_g")
+growth_table(f, component = "coefficients")
+
+# 3) Table of a comparison
+f2 <- growth_fit(g, "gompertz", time = "day", response = "total_mass_g")
+growth_table(growth_compare(f, f2), component = "comparison")
+
+## growth_report()
+# 1) Markdown report of a workflow
+d <- growth_example_data("maize_destructive")
+g <- growth_data(d, time = "day", sampling = "destructive",
+                 experimental_unit = "plot_id", total_mass = "total_mass_g")
+w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+                     models = "logistic", seed = 1)
+rel <- growth_report(w)
+substr(rel, 1, 120)
+
+# 2) Write to a file
+arq <- file.path(tempdir(), "report.md")
+growth_report(w, file = arq, title = "Maize analysis", digits = 3)
+file.exists(arq)
+
+# 3) Control the number of digits
+nchar(growth_report(w, digits = 2))
+
+## growth_export()
+# 1) Preserve the complete object as RDS
+d <- growth_example_data("maize_destructive")
+g <- growth_data(d, time = "day", sampling = "destructive",
+                 experimental_unit = "plot_id", total_mass = "total_mass_g")
+w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+                     models = "logistic", seed = 1)
+rds <- file.path(tempdir(), "workflow.rds")
+growth_export(w, path = rds, format = "rds", overwrite = TRUE)
+file.exists(rds)
+
+# 2) Export the tables as CSV
+csv <- file.path(tempdir(), "workflow.csv")
+growth_export(w, path = csv, format = "csv", overwrite = TRUE)
+file.exists(csv)
+
+# 3) Review bundle with several files
+dir <- file.path(tempdir(), "bundle")
+growth_export(w, path = dir, format = "bundle", overwrite = TRUE)
+basename(list.files(dir))
+
+## print.agri_growth_method_guide()
+# 1) Printed guide
+d <- growth_example_data("maize_destructive")
+g <- growth_data(d, time = "day", sampling = "destructive",
+                 experimental_unit = "plot_id", total_mass = "total_mass_g")
+gu <- growth_method_guide(g, objective = "trajectory")
+print(gu)
+
+# 2) Methods with an available backend
+gu[gu$backend_available, "method"]
+
+# 3) Invisible return
+identical(print(gu), gu)
+
+## print.agri_growth_workflow()
+# 1) Workflow summary
+d <- growth_example_data("maize_destructive")
+g <- growth_data(d, time = "day", sampling = "destructive",
+                 experimental_unit = "plot_id", total_mass = "total_mass_g")
+w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+                     models = "logistic", seed = 1)
+print(w)
+
+# 2) Structure
+str(w, max.level = 1)
+
+# 3) Invisible return
+identical(print(w), w)
+
+## summary.agri_growth_workflow()
+# 1) Summary of an executed workflow
+d <- growth_example_data("maize_destructive")
+g <- growth_data(d, time = "day", sampling = "destructive",
+                 experimental_unit = "plot_id", total_mass = "total_mass_g")
+w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+                     models = "logistic", seed = 1)
+summary(w)
+
+# 2) Class of the summary
+class(summary(w))
+
+# 3) Structure
+str(summary(w), max.level = 1)
 }

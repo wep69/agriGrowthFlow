@@ -29,12 +29,18 @@
 #' @export
 #'
 #' @examples
+#' # 1) Default diagnostics
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' f <- growth_fit(d, "logistic", time = "day", response = "biomass_g")
-#' growth_diagnose(f)
-#' growth_diagnose(f)$issues
-#' growth_diagnose(f)$attempts
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' dg <- growth_diagnose(f)
+#' dg$summary[, c("model", "rmse", "descriptive_r_squared")]
+#'
+#' # 2) Distance to bounds with a looser criterion
+#' growth_diagnose(f, boundary_fraction = 0.2)$boundaries
+#'
+#' # 3) Detected issue codes
+#' growth_diagnose(f)$issues$code
 growth_diagnose <- function(object, boundary_fraction = 0.01) {
   if (!inherits(object, "agri_growth_fit")) stop("`object` must be an `agri_growth_fit`.", call. = FALSE)
   if (!is.numeric(boundary_fraction) || length(boundary_fraction) != 1L || boundary_fraction <= 0 || boundary_fraction >= 0.5) {
@@ -90,6 +96,19 @@ growth_diagnose <- function(object, boundary_fraction = 0.01) {
 }
 
 #' @export
+#' @examples
+#' # 1) Diagnostic summary
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' print(growth_diagnose(f))
+#'
+#' # 2) Residual table
+#' head(growth_diagnose(f)$residuals, 3)
+#'
+#' # 3) Invisible return
+#' dg <- growth_diagnose(f)
+#' identical(print(dg), dg)
 print.agri_growth_diagnostics <- function(x, ...) {
   cat("<agri_growth_diagnostics>\n")
   print(x$summary, row.names = FALSE)

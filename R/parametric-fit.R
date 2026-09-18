@@ -33,7 +33,10 @@
 }
 
 .agf_random_starts <- function(base, lower, upper, n_start, seed = NULL) {
-  if (!is.null(seed)) set.seed(seed)
+  if (!is.null(seed)) {
+    .agf_restore_rng <- .agf_seed_snapshot(); on.exit(.agf_restore_rng(), add = TRUE)
+    set.seed(seed)
+  }
   n_start <- as.integer(n_start)
   if (!is.finite(n_start) || n_start < 1L) stop("`n_start` must be a positive integer.", call. = FALSE)
   starts <- vector("list", n_start)
@@ -195,11 +198,20 @@
 #' @export
 #'
 #' @examples
+#' # 1) A logistic fit
 #' d <- growth_example_data("sunflower_sigmoid")
 #' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
 #' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
-#' growth_fit(d1, c("logistic", "gompertz"), time = "day", response = "biomass_g")
-#' growth_fit(d, "logistic", time = "day", response = "biomass_g", group = "cultivar")
+#' coef(f)
+#'
+#' # 2) Several models in one call
+#' fs <- growth_fit(d1, c("logistic", "gompertz"), time = "day", response = "biomass_g")
+#' fs$models
+#'
+#' # 3) One fit per group
+#' fc <- growth_fit(d, "logistic", time = "day", response = "biomass_g",
+#'                  group = "cultivar")
+#' fc$groups
 growth_fit <- function(x,
                        model = "logistic",
                        time = NULL,
@@ -275,11 +287,23 @@ growth_fit <- function(x,
 #' @export
 #'
 #' @examples
+#' # 1) Several starting values and the best fit
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' growth_multistart(d, "logistic", time = "day", response = "biomass_g", n_start = 5, seed = 1)
-#' growth_multistart(d, "gompertz", time = "day", response = "biomass_g", n_start = 5, seed = 2)
-#' growth_multistart(d, "richards", time = "day", response = "biomass_g", n_start = 5, seed = 3)
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' fm <- growth_multistart(d1, "logistic", time = "day", response = "biomass_g",
+#'                         n_start = 10, seed = 1)
+#' sum(fm$attempts$converged)
+#'
+#' # 2) A fixed seed makes the result reproducible
+#' a <- growth_multistart(d1, "logistic", time = "day", response = "biomass_g",
+#'                        n_start = 5, seed = 42)
+#' b <- growth_multistart(d1, "logistic", time = "day", response = "biomass_g",
+#'                        n_start = 5, seed = 42)
+#' identical(coef(a), coef(b))
+#'
+#' # 3) An explicit starting point
+#' growth_multistart(d1, "logistic", time = "day", response = "biomass_g",
+#'                   start = list(asym = 220, mid = 55, scale = 12), n_start = 3)
 growth_multistart <- function(x, model = "logistic", time = NULL, response = NULL,
                               group = NULL, start = NULL, n_start = 30L, seed = NULL,
                               engine = c("auto", "nls", "minpack.lm"),
@@ -290,11 +314,35 @@ growth_multistart <- function(x, model = "logistic", time = NULL, response = NUL
 }
 
 #' @export
+#' @examples
+#' # 1) Named coefficients
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' coef(f)
+#'
+#' # 2) Access by name
+#' coef(f)[["asym"]]
+#'
+#' # 3) Rounded vector
+#' round(coef(f), 3)
 coef.agri_growth_fit <- function(object, ...) {
   object$coefficients
 }
 
 #' @export
+#' @examples
+#' # 1) Fit summary
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' print(f)
+#'
+#' # 2) Main components
+#' c(n = f$n, rss = f$rss, sigma = f$sigma)
+#'
+#' # 3) Invisible return
+#' identical(print(f), f)
 print.agri_growth_fit <- function(x, ...) {
   cat("<agri_growth_fit> model:", x$model, " engine:", x$engine, "\n")
   cat("Observations:", x$n, " RSS:", .agf_fmt(x$rss), " sigma:", .agf_fmt(x$sigma), "\n")
@@ -305,6 +353,18 @@ print.agri_growth_fit <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) A set of models
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' fs <- growth_fit(d1, c("logistic", "gompertz"), time = "day", response = "biomass_g")
+#' print(fs)
+#'
+#' # 2) Access one fit of the set
+#' class(fs$fits[["logistic"]])
+#'
+#' # 3) Invisible return
+#' identical(print(fs), fs)
 print.agri_growth_fit_set <- function(x, ...) {
   cat("<agri_growth_fit_set> models:", paste(x$models, collapse = ", "), "\n")
   tab <- data.frame(
@@ -318,6 +378,19 @@ print.agri_growth_fit_set <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) A collection by group
+#' d <- growth_example_data("sunflower_sigmoid")
+#' fc <- growth_fit(d, "logistic", time = "day", response = "biomass_g",
+#'                  group = "cultivar")
+#' print(fc)
+#'
+#' # 2) Groups and one specific fit
+#' fc$groups
+#' coef(fc$fits[[1]])
+#'
+#' # 3) Invisible return
+#' identical(print(fc), fc)
 print.agri_growth_fit_collection <- function(x, ...) {
   cat("<agri_growth_fit_collection> group:", x$group, "\n")
   cat("Groups:", paste(x$groups, collapse = ", "), "\n")

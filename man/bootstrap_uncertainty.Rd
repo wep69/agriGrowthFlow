@@ -79,16 +79,93 @@ The package does not present row-wise residual, parametric, or wild resampling a
 \code{growth_boot()} returns an \code{agri_growth_boot}. Interval helpers return data frames. \code{growth_selection_stability()} returns an \code{agri_growth_selection_stability} containing replicate records, model metrics, and winner frequencies.
 }
 \examples{
-d <- growth_example_data("sunflower_sigmoid")
-d <- subset(d, cultivar == unique(d$cultivar)[1])
-f <- growth_fit(d, "logistic", time = "day", response = "biomass_g")
-b <- growth_boot(f, R = 25, seed = 123)
-growth_boot_ci(b, source = "coefficients")
-growth_boot_traits(b, traits = c("t50", "maximum_absolute_rate"))
 
-s <- growth_selection_stability(
-  d, c("logistic", "gompertz"), time = "day", response = "biomass_g",
-  R = 20, seed = 1
-)
-s$frequencies
+## growth_boot()
+# 1) Resampling with the unit chosen by the design
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+b <- growth_boot(f, R = 25, seed = 1)
+b$method
+
+# 2) Case resampling
+growth_boot(f, R = 25, method = "case", seed = 1)$method
+
+# 3) Wild resampling with Mammen weights
+bw <- growth_boot(f, R = 25, method = "wild", wild_weights = "mammen", seed = 1)
+bw$wild_weights
+
+## growth_boot_ci()
+# 1) Percentile interval for one coefficient
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+b <- growth_boot(f, R = 25, seed = 1)
+growth_boot_ci(b, source = "coefficients", parm = "asym")
+
+# 2) Basic interval
+growth_boot_ci(b, parm = "asym", type = "basic")
+
+# 3) Normal interval
+growth_boot_ci(b, parm = "asym", type = "normal", conf = 0.90)
+
+## growth_boot_traits()
+# 1) All traits with intervals
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+b <- growth_boot(f, R = 25, seed = 1)
+head(growth_boot_traits(b))
+
+# 2) Selected traits
+growth_boot_traits(b, traits = c("asymptote", "t50"))
+
+# 3) Basic interval
+growth_boot_traits(b, traits = "asymptote", type = "basic")
+
+## growth_selection_stability()
+# 1) Stability with two models
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+st <- growth_selection_stability(d1, models = c("logistic", "gompertz"),
+                                 time = "day", response = "biomass_g",
+                                 R = 25, seed = 1)
+st$frequencies
+
+# 2) Three models
+growth_selection_stability(d1, models = c("logistic", "gompertz", "richards"),
+                           time = "day", response = "biomass_g",
+                           R = 25, seed = 1)$frequencies
+
+# 3) Applied resampling method
+st$method; st$success_rate
+
+## print.agri_growth_boot()
+# 1) Bootstrap summary
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+b <- growth_boot(f, R = 25, seed = 1)
+print(b)
+
+# 2) Structure
+str(b, max.level = 1)
+
+# 3) Invisible return
+identical(print(b), b)
+
+## print.agri_growth_selection_stability()
+# 1) Stability summary
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+st <- growth_selection_stability(d1, models = c("logistic", "gompertz"),
+                                 time = "day", response = "biomass_g",
+                                 R = 25, seed = 1)
+print(st)
+
+# 2) Per-model metrics
+st$metrics
+
+# 3) Invisible return
+identical(print(st), st)
 }

@@ -83,10 +83,19 @@
 #' @return An object of class `agri_growth_fpca`.
 #' @export
 #' @examples
-#' d <- growth_example_data("bean_repeated")
-#' growth_fpca(d, time="day", response="height_cm", unit="plant_id", group="water_regime")
-#' growth_fpca(d, time="day", response="projected_leaf_area_m2", unit="plant_id", npc=2)
-#' growth_fpca(d, time="day", response="spad", unit="plant_id", smooth="linear", pve=0.90)
+#' # 1) Functional principal components with the grid engine
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' fp <- growth_fpca(g, response = "height_cm", engine = "grid", grid_n = 41)
+#' class(fp)
+#'
+#' # 2) A fixed number of components
+#' growth_fpca(g, response = "height_cm", engine = "grid", npc = 2, grid_n = 41)
+#'
+#' # 3) One fit per group
+#' growth_fpca(g, response = "height_cm", group = "water_regime",
+#'             engine = "grid", grid_n = 31)
 growth_fpca <- function(x,
                         time = NULL,
                         response = NULL,
@@ -197,10 +206,22 @@ growth_fpca <- function(x,
 #' @return An `agri_growth_fpca` object.
 #' @export
 #' @examples
-#' d <- growth_example_data("bean_repeated")
-#' growth_functional(d, time="day", response="height_cm", unit="plant_id")
-#' growth_functional(d, time="day", response="projected_leaf_area_m2", unit="plant_id", npc=2)
-#' growth_functional(d, time="day", response="spad", unit="plant_id", pve=.9)
+#' # 1) Same interface as growth_fpca()
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' class(growth_functional(g, response = "height_cm", engine = "grid", grid_n = 41))
+#'
+#' # 2) Linear smoothing and a smaller basis
+#' growth_functional(g, response = "height_cm", engine = "grid",
+#'                   smooth = "linear", nbasis = 8, grid_n = 31)
+#'
+#' # 3) fdapace engine (requires the fdapace package)
+#' \donttest{
+#' if (requireNamespace("fdapace", quietly = TRUE)) {
+#'   growth_functional(g, response = "height_cm", engine = "fdapace")
+#' }
+#' }
 growth_functional <- function(x, time = NULL, response = NULL, unit = NULL, group = NULL,
                               engine = c("grid", "fdapace", "refund"), aggregate = c("auto", "none", "mean"),
                               grid_n = 101L, npc = NULL, pve = 0.95,
@@ -211,6 +232,19 @@ growth_functional <- function(x, time = NULL, response = NULL, unit = NULL, grou
 }
 
 #' @export
+#' @examples
+#' # 1) FPCA summary
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' fp <- growth_fpca(g, response = "height_cm", engine = "grid", grid_n = 31)
+#' print(fp)
+#'
+#' # 2) Structure
+#' str(fp, max.level = 1)
+#'
+#' # 3) Invisible return
+#' identical(print(fp), fp)
 print.agri_growth_fpca <- function(x, ...) {
   cat("<agri_growth_fpca> engine:", x$engine, " components:", x$npc, "\n")
   cat("Units:", nrow(x$scores_table), " support:", paste(.agf_fmt(x$common_support), collapse = " to "), "\n")

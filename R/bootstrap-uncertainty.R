@@ -144,12 +144,19 @@
 #' @export
 #'
 #' @examples
+#' # 1) Resampling with the unit chosen by the design
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' f <- growth_fit(d, "logistic", time = "day", response = "biomass_g")
-#' b <- growth_boot(f, R = 25, seed = 123)
-#' growth_boot_ci(b, source = "coefficients")
-#' growth_boot_traits(b)
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' b <- growth_boot(f, R = 25, seed = 1)
+#' b$method
+#'
+#' # 2) Case resampling
+#' growth_boot(f, R = 25, method = "case", seed = 1)$method
+#'
+#' # 3) Wild resampling with Mammen weights
+#' bw <- growth_boot(f, R = 25, method = "wild", wild_weights = "mammen", seed = 1)
+#' bw$wild_weights
 growth_boot <- function(object,
                         R = 999L,
                         method = c("auto", "case", "cluster", "residual", "parametric", "wild", "cluster_wild"),
@@ -165,7 +172,10 @@ growth_boot <- function(object,
   R <- .agf_boot_validate_R(R)
   method <- .agf_boot_method(match.arg(method), object$data)
   wild_weights <- match.arg(wild_weights)
-  if (!is.null(seed)) set.seed(seed)
+  if (!is.null(seed)) {
+    .agf_restore_rng <- .agf_seed_snapshot(); on.exit(.agf_restore_rng(), add = TRUE)
+    set.seed(seed)
+  }
 
   coef_names <- names(object$coefficients)
   trait0 <- .agf_boot_numeric_traits(object)
@@ -220,6 +230,19 @@ growth_boot <- function(object,
 }
 
 #' @export
+#' @examples
+#' # 1) Bootstrap summary
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' b <- growth_boot(f, R = 25, seed = 1)
+#' print(b)
+#'
+#' # 2) Structure
+#' str(b, max.level = 1)
+#'
+#' # 3) Invisible return
+#' identical(print(b), b)
 print.agri_growth_boot <- function(x, ...) {
   cat("<agri_growth_boot> model:", x$model, "\n")
   cat("Method:", x$method, " Replicates:", x$R, " Success:", sprintf("%.1f%%", 100 * x$success_rate), "\n")
@@ -256,13 +279,18 @@ print.agri_growth_boot <- function(x, ...) {
 #' @export
 #'
 #' @examples
+#' # 1) Percentile interval for one coefficient
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' f <- growth_fit(d, "logistic", time = "day", response = "biomass_g")
-#' b <- growth_boot(f, R = 25, seed = 10)
-#' growth_boot_ci(b, "coefficients")
-#' growth_boot_ci(b, "traits", parm = c("t50", "maximum_absolute_rate"))
-#' growth_boot_ci(b, "coefficients", type = "basic")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' b <- growth_boot(f, R = 25, seed = 1)
+#' growth_boot_ci(b, source = "coefficients", parm = "asym")
+#'
+#' # 2) Basic interval
+#' growth_boot_ci(b, parm = "asym", type = "basic")
+#'
+#' # 3) Normal interval
+#' growth_boot_ci(b, parm = "asym", type = "normal", conf = 0.90)
 growth_boot_ci <- function(object,
                            source = c("coefficients", "traits"),
                            parm = NULL,
@@ -308,13 +336,18 @@ growth_boot_ci <- function(object,
 #' @export
 #'
 #' @examples
+#' # 1) All traits with intervals
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' f <- growth_fit(d, "logistic", time = "day", response = "biomass_g")
-#' b <- growth_boot(f, R = 25, seed = 11)
-#' growth_boot_traits(b, traits = c("t50", "t90"))
-#' growth_boot_traits(b, type = "normal")
-#' growth_boot_traits(b, conf = 0.90)
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' b <- growth_boot(f, R = 25, seed = 1)
+#' head(growth_boot_traits(b))
+#'
+#' # 2) Selected traits
+#' growth_boot_traits(b, traits = c("asymptote", "t50"))
+#'
+#' # 3) Basic interval
+#' growth_boot_traits(b, traits = "asymptote", type = "basic")
 growth_boot_traits <- function(object,
                                traits = NULL,
                                conf = 0.95,
@@ -354,13 +387,21 @@ growth_boot_traits <- function(object,
 #' @export
 #'
 #' @examples
+#' # 1) Stability with two models
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' s <- growth_selection_stability(d, c("logistic", "gompertz"), time = "day",
-#'                                 response = "biomass_g", R = 20, seed = 1)
-#' s$frequencies
-#' print(s)
-#' subset(s$replicates, success)
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' st <- growth_selection_stability(d1, models = c("logistic", "gompertz"),
+#'                                  time = "day", response = "biomass_g",
+#'                                  R = 25, seed = 1)
+#' st$frequencies
+#'
+#' # 2) Three models
+#' growth_selection_stability(d1, models = c("logistic", "gompertz", "richards"),
+#'                            time = "day", response = "biomass_g",
+#'                            R = 25, seed = 1)$frequencies
+#'
+#' # 3) Applied resampling method
+#' st$method; st$success_rate
 growth_selection_stability <- function(x,
                                        models,
                                        time = NULL,
@@ -381,7 +422,10 @@ growth_selection_stability <- function(x,
   method <- match.arg(method)
   method <- if (identical(method, "auto")) .agf_boot_method("auto", d) else method
   if (!method %in% c("case", "cluster")) stop("Model-selection stability uses case or cluster resampling.", call. = FALSE)
-  if (!is.null(seed)) set.seed(seed)
+  if (!is.null(seed)) {
+    .agf_restore_rng <- .agf_seed_snapshot(); on.exit(.agf_restore_rng(), add = TRUE)
+    set.seed(seed)
+  }
 
   rows <- vector("list", R)
   metric_rows <- list()
@@ -430,6 +474,20 @@ growth_selection_stability <- function(x,
 }
 
 #' @export
+#' @examples
+#' # 1) Stability summary
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' st <- growth_selection_stability(d1, models = c("logistic", "gompertz"),
+#'                                  time = "day", response = "biomass_g",
+#'                                  R = 25, seed = 1)
+#' print(st)
+#'
+#' # 2) Per-model metrics
+#' st$metrics
+#'
+#' # 3) Invisible return
+#' identical(print(st), st)
 print.agri_growth_selection_stability <- function(x, ...) {
   cat("<agri_growth_selection_stability>\n")
   cat("Method:", x$method, " Replicates:", x$R, " Success:", sprintf("%.1f%%", 100 * x$success_rate), "\n")

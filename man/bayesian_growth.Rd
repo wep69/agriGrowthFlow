@@ -125,12 +125,263 @@ Version 0.4.0 intentionally restricts the Bayesian wrapper to logistic, Gompertz
 \code{growth_prior()} returns an \code{agri_growth_prior}. \code{growth_bayes()} and \code{growth_prior_predict()} return \code{agri_growth_bayes} objects containing the underlying \code{brmsfit}. \code{growth_pp_check()} returns the brms/bayesplot check. \code{growth_bayes_diagnose()} returns an MCMC diagnostic object. \code{growth_posterior_traits()} returns a long posterior trait summary.
 }
 \examples{
-d <- growth_example_data("sunflower_sigmoid")
-p <- growth_prior(d, "logistic", time = "day", response = "biomass_g")
-p
 
+## growth_prior()
+# 1) Logistic priors
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+growth_prior(d1, "logistic", time = "day", response = "biomass_g")
+
+# 2) Another model
+growth_prior(d1, "gompertz", time = "day", response = "biomass_g")
+
+# 3) A model with a shape parameter
+growth_prior(d1, "richards", time = "day", response = "biomass_g")
+
+## growth_bayes()
+# 1) Bayesian logistic fit (requires brms and a Stan backend)
+\donttest{
 if (requireNamespace("brms", quietly = TRUE)) {
-  # Bayesian fitting compiles and samples a Stan model and is not run here.
-  # b <- growth_bayes(d, "logistic", time = "day", response = "biomass_g")
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  class(b)
+}
+}
+
+# 2) Without group effects and without random effects
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+               group_effects = "none", random = "none",
+               chains = 1, iter = 200, warmup = 100, cores = 1,
+               seed = 1, refresh = 0)$random
+}
+}
+
+# 3) Prior-only sampling, useful to check the assumptions
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+               sample_prior = "only", chains = 1, iter = 200, warmup = 100,
+               cores = 1, seed = 1, refresh = 0)$prior_only
+}
+}
+
+## growth_prior_predict()
+# 1) Prior predictive simulation
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  pp <- growth_prior_predict(d1, "logistic", time = "day", response = "biomass_g",
+                             chains = 1, iter = 200, warmup = 100, cores = 1,
+                             seed = 1, refresh = 0)
+  class(pp)
+}
+}
+
+# 2) Without group effects
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  growth_prior_predict(d1, "logistic", time = "day", response = "biomass_g",
+                       group_effects = "none", random = "none",
+                       chains = 1, iter = 200, warmup = 100, cores = 1,
+                       seed = 1, refresh = 0)$has_group
+}
+}
+
+# 3) Structure of the result
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  pp <- growth_prior_predict(d1, "logistic", time = "day", response = "biomass_g",
+                             group_effects = "none", random = "none",
+                             chains = 1, iter = 200, warmup = 100, cores = 1,
+                             seed = 1, refresh = 0)
+  str(pp, max.level = 1)
+}
+}
+
+## growth_pp_check()
+# 1) Posterior predictive check
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  growth_pp_check(b, type = "dens_overlay", ndraws = 10)
+}
+}
+
+# 2) Another plot type
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  growth_pp_check(b, type = "hist", ndraws = 10)
+}
+}
+
+# 3) The output is a ggplot object
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  class(growth_pp_check(b, ndraws = 5))[1]
+}
+}
+
+## growth_bayes_diagnose()
+# 1) MCMC diagnostics
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  growth_bayes_diagnose(b)
+}
+}
+
+# 2) Stricter thresholds
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  growth_bayes_diagnose(b, rhat_threshold = 1.001, min_ess = 1000)
+}
+}
+
+# 3) Structure of the diagnostics
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  str(growth_bayes_diagnose(b), max.level = 1)
+}
+}
+
+## growth_posterior_traits()
+# 1) Posterior traits with intervals
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  growth_posterior_traits(b, grid_n = 51)
+}
+}
+
+# 2) Different central probabilities
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  growth_posterior_traits(b, probs = c(0.1, 0.5, 0.9), grid_n = 51)
+}
+}
+
+# 3) Structure of the result
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  str(growth_posterior_traits(b, grid_n = 31), max.level = 1)
+}
+}
+
+## print.agri_growth_prior()
+# 1) Prior table
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+pr <- growth_prior(d1, "logistic", time = "day", response = "biomass_g")
+print(pr)
+
+# 2) Subset of rows
+pr[pr$role == "intercept", c("nlpar", "prior")]
+
+# 3) Invisible return
+identical(print(pr), pr)
+
+## print.agri_growth_bayes()
+# 1) Bayesian fit summary
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  print(b)
+}
+}
+
+# 2) Formula actually fitted
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  b$formula
+}
+}
+
+# 3) Object structure
+\donttest{
+if (requireNamespace("brms", quietly = TRUE)) {
+  d <- growth_example_data("sunflower_sigmoid")
+  d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+  b <- growth_bayes(d1, "logistic", time = "day", response = "biomass_g",
+                    group_effects = "none", random = "none",
+                    chains = 1, iter = 200, warmup = 100, cores = 1,
+                    seed = 1, refresh = 0)
+  str(b, max.level = 1)
+}
 }
 }

@@ -31,3 +31,66 @@ Fits design-aware polynomial longitudinal growth models using \code{nlme::lme()}
 \code{correlation="ar1"} is restricted to integer-valued time. Use \code{correlation="car1"} for irregular continuous time. Destructive subsamples are averaged within persistent experimental unit and time under the default automatic aggregation rule. The function does not select covariance structures only by significance tests; scientific design, residual dependence, fit diagnostics, and interpretability should be considered together.
 }
 \value{\code{growth_mixed()} returns an \code{agri_growth_mixed} object. \code{growth_mixed_diagnose()} returns an \code{agri_growth_mixed_diagnostics} object.}
+
+\examples{
+
+## growth_mixed()
+# 1) Mixed model with degree 2
+b <- growth_example_data("bean_repeated")
+g <- growth_data(b, time = "day", sampling = "repeated",
+                 experimental_unit = "plant_id", treatment = "water_regime",
+                 block = "block")
+mx <- growth_mixed(g, response = "height_cm")
+mx$method
+
+# 2) Lower fixed degree
+growth_mixed(g, response = "height_cm", degree = 1)$degree
+
+# 3) AR(1) residual correlation
+growth_mixed(g, response = "height_cm", correlation = "ar1")$correlation
+
+## growth_mixed_diagnose()
+# 1) Diagnostics of the mixed model
+b <- growth_example_data("bean_repeated")
+g <- growth_data(b, time = "day", sampling = "repeated",
+                 experimental_unit = "plant_id", treatment = "water_regime",
+                 block = "block")
+mx <- growth_mixed(g, response = "height_cm")
+md <- growth_mixed_diagnose(mx)
+class(md)
+
+# 2) Printed summary
+print(md)
+
+# 3) Structure
+str(md, max.level = 1)
+
+## print.agri_growth_mixed()
+# 1) Model summary
+b <- growth_example_data("bean_repeated")
+g <- growth_data(b, time = "day", sampling = "repeated",
+                 experimental_unit = "plant_id", treatment = "water_regime")
+mx <- growth_mixed(g, response = "height_cm")
+print(mx)
+
+# 2) Fixed effects
+nlme::fixef(mx$fit)
+
+# 3) Invisible return
+identical(print(mx), mx)
+
+## print.agri_growth_mixed_diagnostics()
+# 1) Printed diagnostics
+b <- growth_example_data("bean_repeated")
+g <- growth_data(b, time = "day", sampling = "repeated",
+                 experimental_unit = "plant_id", treatment = "water_regime")
+mx <- growth_mixed(g, response = "height_cm")
+print(growth_mixed_diagnose(mx))
+
+# 2) Structure
+str(growth_mixed_diagnose(mx), max.level = 1)
+
+# 3) Invisible return
+md <- growth_mixed_diagnose(mx)
+identical(print(md), md)
+}

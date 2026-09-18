@@ -40,12 +40,21 @@
 #' @export
 #'
 #' @examples
+#' # 1) Indices per persistent unit
 #' d <- growth_example_data("maize_destructive")
 #' g <- growth_data(d, time = "day", sampling = "destructive",
-#'   experimental_unit = "plot_id", treatment = "nitrogen", block = "block",
-#'   total_mass = "total_mass_g", leaf_area = "leaf_area_m2",
-#'   leaf_mass = "leaf_mass_g", ground_area = "ground_area_m2")
-#' growth_indices(g)
+#'                  experimental_unit = "plot_id", treatment = "nitrogen",
+#'                  block = "block", total_mass = "total_mass_g",
+#'                  leaf_area = "leaf_area_m2", leaf_mass = "leaf_mass_g",
+#'                  ground_area = "ground_area_m2")
+#' cl <- growth_classical(g)
+#' head(cl$intervals[, c("plot_id", "t1", "t2", "AGR", "RGR")])
+#'
+#' # 2) Group by treatment
+#' names(growth_classical(g, by = "nitrogen")$intervals)[1:3]
+#'
+#' # 3) Unit declared explicitly
+#' growth_classical(g, unit = "plot_id")$unit
 
 growth_classical <- function(x,
                              time = NULL,
@@ -217,11 +226,38 @@ growth_classical <- function(x,
 
 #' @rdname growth_classical
 #' @export
+#' @examples
+#' # 1) Shortcut for growth_classical()
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", treatment = "nitrogen",
+#'                  block = "block", total_mass = "total_mass_g")
+#' ii <- growth_indices(g)
+#' class(ii)
+#'
+#' # 2) Available metrics
+#' setdiff(names(ii$intervals), c("nitrogen", "block", "plot_id", "t1", "t2", "dt"))
+#'
+#' # 3) Table aggregated by unit and time
+#' head(ii$aggregated, 3)
 growth_indices <- function(x, ...) {
   growth_classical(x, ...)
 }
 
 #' @export
+#' @examples
+#' # 1) Summary of the object
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' print(growth_indices(g))
+#'
+#' # 2) Invisible return
+#' ii <- growth_indices(g)
+#' identical(print(ii), ii)
+#'
+#' # 3) Structure
+#' str(ii, max.level = 1)
 print.agri_growth_indices <- function(x, ...) {
   cat("<agri_growth_indices>\n")
   cat("Stable unit:", x$unit, " Sampling:", x$sampling, "\n")

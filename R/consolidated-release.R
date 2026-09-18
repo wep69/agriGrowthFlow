@@ -56,16 +56,20 @@
 #' @export
 #'
 #' @examples
+#' # 1) Trajectory objective
 #' d <- growth_example_data("maize_destructive")
 #' g <- growth_data(d, time = "day", sampling = "destructive",
 #'                  experimental_unit = "plot_id", treatment = "nitrogen",
-#'                  total_mass = "total_mass_g", leaf_area = "leaf_area_m2")
-#' growth_method_guide(g, objective = "rates")
-#' growth_method_guide(g, objective = "trajectory")
-#' b <- growth_example_data("bean_repeated")
-#' growth_method_guide(b, time = "day", response = "height_cm",
-#'                     unit = "plant_id", group = "water_regime",
-#'                     objective = "treatment_comparison")
+#'                  block = "block", total_mass = "total_mass_g",
+#'                  leaf_area = "leaf_area_m2", leaf_mass = "leaf_mass_g")
+#' gu <- growth_method_guide(g, objective = "trajectory")
+#' gu[, c("method", "priority")]
+#'
+#' # 2) Another objective
+#' growth_method_guide(g, objective = "treatment_comparison")$method
+#'
+#' # 3) Without optional methods
+#' growth_method_guide(g, objective = "rates", include_optional = FALSE)$method
 growth_method_guide <- function(x,
                                 time = NULL,
                                 response = NULL,
@@ -171,6 +175,19 @@ growth_method_guide <- function(x,
 }
 
 #' @export
+#' @examples
+#' # 1) Printed guide
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' gu <- growth_method_guide(g, objective = "trajectory")
+#' print(gu)
+#'
+#' # 2) Methods with an available backend
+#' gu[gu$backend_available, "method"]
+#'
+#' # 3) Invisible return
+#' identical(print(gu), gu)
 print.agri_growth_method_guide <- function(x, ...) {
   cat("<agri_growth_method_guide> objective:", attr(x, "objective") %||% "unspecified", "\n")
   cat("Times:", attr(x, "n_times") %||% NA_integer_, " Units:", attr(x, "n_units") %||% NA_integer_, " Sampling:", attr(x, "sampling") %||% "unspecified", "\n")
@@ -260,14 +277,23 @@ print.agri_growth_method_guide <- function(x, ...) {
 #' @export
 #'
 #' @examples
-#' d <- growth_example_data("sunflower_sigmoid")
-#' growth_workflow(d, time = "day", response = "biomass_g", execute = FALSE)
-#' growth_workflow(d, time = "day", response = "biomass_g",
-#'                 strategy = "parametric", models = c("logistic", "gompertz"),
-#'                 n_start = 3, seed = 1)
-#' b <- growth_example_data("bean_repeated")
-#' growth_workflow(b, time = "day", response = "height_cm", unit = "plant_id",
-#'                 group = "water_regime", strategy = "smooth")
+#' # 1) Analysis contract without execution
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", treatment = "nitrogen",
+#'                  block = "block", total_mass = "total_mass_g")
+#' plan <- growth_workflow(g, objective = "trajectory", execute = FALSE, seed = 1)
+#' plan$executed
+#'
+#' # 2) Explicit execution with a declared strategy
+#' w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+#'                      models = "logistic", seed = 1)
+#' w$selected_strategy
+#'
+#' # 3) With a bootstrap uncertainty layer
+#' growth_workflow(g, objective = "uncertainty", strategy = "parametric",
+#'                 models = "logistic", uncertainty = "bootstrap",
+#'                 bootstrap_R = 25, seed = 1)$uncertainty_method
 growth_workflow <- function(x,
                             time = NULL,
                             response = NULL,
@@ -348,7 +374,10 @@ growth_workflow <- function(x,
     stop("The declared growth-data structure contains error-level validation issues. Resolve them before executing the consolidated workflow.", call. = FALSE)
   }
   dots <- list(...)
-  if (!is.null(seed)) set.seed(seed)
+  if (!is.null(seed)) {
+    .agf_restore_rng <- .agf_seed_snapshot(); on.exit(.agf_restore_rng(), add = TRUE)
+    set.seed(seed)
+  }
 
   if (identical(selected, "classical")) {
     if (inherits(x, "agri_growth_data")) {
@@ -425,6 +454,20 @@ growth_workflow <- function(x,
 }
 
 #' @export
+#' @examples
+#' # 1) Workflow summary
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+#'                      models = "logistic", seed = 1)
+#' print(w)
+#'
+#' # 2) Structure
+#' str(w, max.level = 1)
+#'
+#' # 3) Invisible return
+#' identical(print(w), w)
 print.agri_growth_workflow <- function(x, ...) {
   cat("<agri_growth_workflow> agriGrowthFlow", x$package_version %||% "1.0.0", "\n")
   cat("Objective:", x$objective, " Strategy:", x$selected_strategy, " Executed:", x$executed, "\n")
@@ -434,6 +477,20 @@ print.agri_growth_workflow <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) Summary of an executed workflow
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+#'                      models = "logistic", seed = 1)
+#' summary(w)
+#'
+#' # 2) Class of the summary
+#' class(summary(w))
+#'
+#' # 3) Structure
+#' str(summary(w), max.level = 1)
 summary.agri_growth_workflow <- function(object, ...) {
   out <- list(
     objective = object$objective,
@@ -458,6 +515,22 @@ summary.agri_growth_workflow <- function(object, ...) {
 #' @param object An `agri_growth_workflow` object.
 #' @return A data frame with PASS, INFO, or FAIL gates.
 #' @export
+#' @examples
+#' # 1) Audit of an analysis contract
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' plan <- growth_workflow(g, objective = "trajectory", execute = FALSE, seed = 1)
+#' growth_workflow_audit(plan)
+#'
+#' # 2) Audit of an executed workflow
+#' w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+#'                      models = "logistic", seed = 1)
+#' growth_workflow_audit(w)$status
+#'
+#' # 3) Gates that did not pass
+#' aud <- growth_workflow_audit(plan)
+#' aud[aud$status != "PASS", c("gate", "status")]
 growth_workflow_audit <- function(object) {
   if (!inherits(object, "agri_growth_workflow")) stop("`object` must be an `agri_growth_workflow`.", call. = FALSE)
   rows <- list()
@@ -517,6 +590,22 @@ growth_workflow_audit <- function(object) {
 #' @param component Requested result view. `"auto"` chooses a conservative class-specific view.
 #' @return A data frame.
 #' @export
+#' @examples
+#' # 1) Audit table of a workflow
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+#'                      models = "logistic", seed = 1)
+#' growth_table(w, component = "audit")
+#'
+#' # 2) Coefficients of a fit
+#' f <- growth_fit(g, "logistic", time = "day", response = "total_mass_g")
+#' growth_table(f, component = "coefficients")
+#'
+#' # 3) Table of a comparison
+#' f2 <- growth_fit(g, "gompertz", time = "day", response = "total_mass_g")
+#' growth_table(growth_compare(f, f2), component = "comparison")
 growth_table <- function(object, component = c("auto", "audit", "traits", "comparison", "diagnostics", "intervals", "coefficients", "guide")) {
   component <- match.arg(component)
   if (inherits(object, "agri_growth_workflow")) {
@@ -559,7 +648,37 @@ growth_table <- function(object, component = c("auto", "audit", "traits", "compa
     return(.agf_release_diagnostic_table(object))
   }
   if (is.data.frame(object)) return(object)
-  stop("No standardized table view is available for this object and component.", call. = FALSE)
+  disponiveis <- .agf_available_components(object)
+  stop("No standardized table view is available for this object and component `", component, "`.",
+       if (length(disponiveis)) paste0(" Available components for this object: ",
+                                       paste(disponiveis, collapse = ", "), ".") else "",
+       call. = FALSE)
+}
+
+## Component views that each supported class can serve. Used only to make the
+## error message actionable when a requested component has no view.
+.agf_available_components <- function(object) {
+  if (inherits(object, "agri_growth_workflow")) {
+    out <- c("audit", "guide")
+    if (!is.null(object$traits)) out <- c(out, "traits")
+    if (!is.null(object$comparison)) out <- c(out, "comparison")
+    if (!is.null(object$diagnostics) &&
+        !(is.list(object$diagnostics) && !inherits(object$diagnostics,
+          c("agri_growth_diagnostics", "agri_growth_mixed_diagnostics", "agri_growth_bayes_diagnostics"))))
+      out <- c(out, "diagnostics")
+    return(c(out, "intervals", "coefficients"))
+  }
+  if (inherits(object, c("agri_growth_fit", "agri_growth_fit_set", "agri_growth_allometry")))
+    return(c("auto", "coefficients",
+             if (inherits(object, c("agri_growth_fit", "agri_growth_fit_set"))) "traits"))
+  if (is.data.frame(object) ||
+      inherits(object, c("agri_growth_method_guide", "agri_growth_comparison",
+                         "agri_growth_validation", "agri_growth_indices",
+                         "agri_growth_smooth", "agri_growth_smooth_collection",
+                         "agri_growth_boot", "agri_growth_diagnostics",
+                         "agri_growth_mixed_diagnostics", "agri_growth_bayes_diagnostics")))
+    return("auto")
+  character()
 }
 
 .agf_md_escape <- function(x) {
@@ -588,6 +707,23 @@ growth_table <- function(object, component = c("auto", "audit", "traits", "compa
 #' @param digits Number of displayed decimal places.
 #' @return A character vector containing Markdown. Invisibly writes the same content when `file` is supplied.
 #' @export
+#' @examples
+#' # 1) Markdown report of a workflow
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+#'                      models = "logistic", seed = 1)
+#' rel <- growth_report(w)
+#' substr(rel, 1, 120)
+#'
+#' # 2) Write to a file
+#' arq <- file.path(tempdir(), "report.md")
+#' growth_report(w, file = arq, title = "Maize analysis", digits = 3)
+#' file.exists(arq)
+#'
+#' # 3) Control the number of digits
+#' nchar(growth_report(w, digits = 2))
 growth_report <- function(object, file = NULL, title = "agriGrowthFlow analysis report", digits = 4L) {
   if (!inherits(object, "agri_growth_workflow")) stop("`object` must be an `agri_growth_workflow`.", call. = FALSE)
   audit <- growth_workflow_audit(object)
@@ -633,6 +769,26 @@ growth_report <- function(object, file = NULL, title = "agriGrowthFlow analysis 
 #' @param overwrite Whether an existing target may be replaced.
 #' @return Invisibly, the normalized output path.
 #' @export
+#' @examples
+#' # 1) Preserve the complete object as RDS
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' w <- growth_workflow(g, objective = "trajectory", strategy = "parametric",
+#'                      models = "logistic", seed = 1)
+#' rds <- file.path(tempdir(), "workflow.rds")
+#' growth_export(w, path = rds, format = "rds", overwrite = TRUE)
+#' file.exists(rds)
+#'
+#' # 2) Export the tables as CSV
+#' csv <- file.path(tempdir(), "workflow.csv")
+#' growth_export(w, path = csv, format = "csv", overwrite = TRUE)
+#' file.exists(csv)
+#'
+#' # 3) Review bundle with several files
+#' dir <- file.path(tempdir(), "bundle")
+#' growth_export(w, path = dir, format = "bundle", overwrite = TRUE)
+#' basename(list.files(dir))
 growth_export <- function(object, path, format = c("rds", "csv", "bundle"), overwrite = FALSE) {
   format <- match.arg(format)
   if (!is.character(path) || length(path) != 1L || !nzchar(path)) stop("`path` must be one non-empty path.", call. = FALSE)

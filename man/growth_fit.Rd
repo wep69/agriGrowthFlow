@@ -30,3 +30,94 @@ growth_multistart(x, model = "logistic", time = NULL, response = NULL,
 }
 \description{Fits bounded nonlinear plant-growth models. Serial destructive or repeated structures retain explicit warnings because ordinary nonlinear least squares does not represent within-unit longitudinal dependence.}
 \value{A single fit, candidate fit set, or grouped fit collection.}
+
+\examples{
+
+## growth_fit()
+# 1) A logistic fit
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+coef(f)
+
+# 2) Several models in one call
+fs <- growth_fit(d1, c("logistic", "gompertz"), time = "day", response = "biomass_g")
+fs$models
+
+# 3) One fit per group
+fc <- growth_fit(d, "logistic", time = "day", response = "biomass_g",
+                 group = "cultivar")
+fc$groups
+
+## growth_multistart()
+# 1) Several starting values and the best fit
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+fm <- growth_multistart(d1, "logistic", time = "day", response = "biomass_g",
+                        n_start = 10, seed = 1)
+sum(fm$attempts$converged)
+
+# 2) A fixed seed makes the result reproducible
+a <- growth_multistart(d1, "logistic", time = "day", response = "biomass_g",
+                       n_start = 5, seed = 42)
+b <- growth_multistart(d1, "logistic", time = "day", response = "biomass_g",
+                       n_start = 5, seed = 42)
+identical(coef(a), coef(b))
+
+# 3) An explicit starting point
+growth_multistart(d1, "logistic", time = "day", response = "biomass_g",
+                  start = list(asym = 220, mid = 55, scale = 12), n_start = 3)
+
+## coef.agri_growth_fit()
+# 1) Named coefficients
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+coef(f)
+
+# 2) Access by name
+coef(f)[["asym"]]
+
+# 3) Rounded vector
+round(coef(f), 3)
+
+## print.agri_growth_fit()
+# 1) Fit summary
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+print(f)
+
+# 2) Main components
+c(n = f$n, rss = f$rss, sigma = f$sigma)
+
+# 3) Invisible return
+identical(print(f), f)
+
+## print.agri_growth_fit_set()
+# 1) A set of models
+d <- growth_example_data("sunflower_sigmoid")
+d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+fs <- growth_fit(d1, c("logistic", "gompertz"), time = "day", response = "biomass_g")
+print(fs)
+
+# 2) Access one fit of the set
+class(fs$fits[["logistic"]])
+
+# 3) Invisible return
+identical(print(fs), fs)
+
+## print.agri_growth_fit_collection()
+# 1) A collection by group
+d <- growth_example_data("sunflower_sigmoid")
+fc <- growth_fit(d, "logistic", time = "day", response = "biomass_g",
+                 group = "cultivar")
+print(fc)
+
+# 2) Groups and one specific fit
+fc$groups
+coef(fc$fits[[1]])
+
+# 3) Invisible return
+identical(print(fc), fc)
+}

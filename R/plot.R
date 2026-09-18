@@ -12,6 +12,20 @@
 #'
 #' @return A ggplot object.
 #' @export
+#' @examples
+#' # 1) Trajectories by treatment
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", treatment = "nitrogen",
+#'                  total_mass = "total_mass_g")
+#' growth_plot(g, response = "total_mass_g", group = "nitrogen")
+#'
+#' # 2) Mean with standard error on a log scale
+#' growth_plot(g, response = "total_mass_g", group = "nitrogen",
+#'             summary = "mean_se", log_y = TRUE)
+#'
+#' # 3) Faceted by block
+#' growth_plot(g, response = "total_mass_g", group = "nitrogen", facet = "block")
 
 growth_plot <- function(x,
                         response = NULL,

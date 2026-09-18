@@ -27,6 +27,7 @@
 #' @export
 #'
 #' @examples
+#' # 1) Full declaration of a destructive-harvest trial
 #' d <- growth_example_data("maize_destructive")
 #' g <- growth_data(
 #'   d, time = "day", sampling = "destructive",
@@ -35,6 +36,21 @@
 #'   leaf_mass = "leaf_mass_g", ground_area = "ground_area_m2"
 #' )
 #' g
+#'
+#' # 2) Repeated measurements on the same plant
+#' b <- growth_example_data("bean_repeated")
+#' gb <- growth_data(
+#'   b, time = "day", sampling = "repeated",
+#'   experimental_unit = "plant_id", treatment = "water_regime",
+#'   block = "block"
+#' )
+#' gb$sampling
+#'
+#' # 3) Minimal declaration and a missing-column error
+#' g2 <- growth_data(d, time = "day", sampling = "destructive",
+#'                   experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' g2$roles$time
+#' try(growth_data(d, time = "dia", experimental_unit = "plot_id"))
 
 growth_data <- function(data,
                         time,
@@ -92,11 +108,38 @@ growth_data <- function(data,
 }
 
 #' @export
+#' @examples
+#' # 1) Recover the original data frame
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' z <- as.data.frame(g)
+#' class(z)
+#'
+#' # 2) Dimensions and names preserved
+#' dim(z)
+#' names(z)[1:4]
+#'
+#' # 3) Use the frame with ordinary functions
+#' head(z, 3)
 as.data.frame.agri_growth_data <- function(x, ...) {
   x$data
 }
 
 #' @export
+#' @examples
+#' # 1) Readable summary of the object
+#' d <- growth_example_data("maize_destructive")
+#' g <- growth_data(d, time = "day", sampling = "destructive",
+#'                  experimental_unit = "plot_id", total_mass = "total_mass_g")
+#' print(g)
+#'
+#' # 2) The return is the object itself, invisibly
+#' x <- print(g)
+#' identical(x, g)
+#'
+#' # 3) Internal structure
+#' str(g, max.level = 1)
 print.agri_growth_data <- function(x, ...) {
   cat("<agri_growth_data>\n")
   cat("Rows:", nrow(x$data), " Columns:", ncol(x$data), "\n")
@@ -116,7 +159,16 @@ print.agri_growth_data <- function(x, ...) {
 #' @export
 #'
 #' @examples
-#' head(growth_example_data("maize_destructive"))
+#' # 1) Dimensions of one teaching dataset
+#' d <- growth_example_data("maize_destructive")
+#' dim(d)
+#'
+#' # 2) Columns of another dataset
+#' names(growth_example_data("coffee_diphasic"))
+#'
+#' # 3) Two more accepted names
+#' growth_example_data("bean_repeated")
+#' length(unique(growth_example_data("maize_density")$nitrogen))
 
 growth_example_data <- function(name = c("maize_destructive", "bean_repeated", "soybean_partition", "sunflower_sigmoid", "wheat_expolinear", "soybean_irregular", "coffee_diphasic", "bean_defoliation", "maize_density", "tree_competition")) {
   name <- match.arg(name)

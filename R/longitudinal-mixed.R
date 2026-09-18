@@ -52,13 +52,19 @@
 #' @export
 #'
 #' @examples
-#' d <- growth_example_data("bean_repeated")
-#' growth_mixed(d, time = "day", response = "height_cm", unit = "plant_id",
-#'              group = "water_regime", block = "block", degree = 2)
-#' growth_mixed(d, time = "day", response = "projected_leaf_area_m2", unit = "plant_id",
-#'              group = "water_regime", correlation = "car1")
-#' growth_mixed(d, time = "day", response = "spad", unit = "plant_id",
-#'              group = "water_regime", variance = "group", degree = 1)
+#' # 1) Mixed model with degree 2
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime",
+#'                  block = "block")
+#' mx <- growth_mixed(g, response = "height_cm")
+#' mx$method
+#'
+#' # 2) Lower fixed degree
+#' growth_mixed(g, response = "height_cm", degree = 1)$degree
+#'
+#' # 3) AR(1) residual correlation
+#' growth_mixed(g, response = "height_cm", correlation = "ar1")$correlation
 growth_mixed <- function(x,
                          time = NULL,
                          response = NULL,
@@ -159,13 +165,20 @@ growth_mixed <- function(x,
 #' @return An `agri_growth_mixed_diagnostics` object.
 #' @export
 #' @examples
-#' d <- growth_example_data("bean_repeated")
-#' if (requireNamespace("nlme", quietly = TRUE)) {
-#'   m <- growth_mixed(d, time="day", response="height_cm", unit="plant_id", group="water_regime")
-#'   growth_mixed_diagnose(m)
-#'   growth_mixed_diagnose(growth_mixed(d, time="day", response="spad", unit="plant_id", degree=1))
-#'   growth_mixed_diagnose(growth_mixed(d, time="day", response="projected_leaf_area_m2", unit="plant_id", correlation="car1"))
-#' }
+#' # 1) Diagnostics of the mixed model
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime",
+#'                  block = "block")
+#' mx <- growth_mixed(g, response = "height_cm")
+#' md <- growth_mixed_diagnose(mx)
+#' class(md)
+#'
+#' # 2) Printed summary
+#' print(md)
+#'
+#' # 3) Structure
+#' str(md, max.level = 1)
 growth_mixed_diagnose <- function(object) {
   if (!inherits(object, "agri_growth_mixed")) stop("`object` must be an `agri_growth_mixed` object.", call. = FALSE)
   fit <- object$fit
@@ -203,6 +216,19 @@ growth_mixed_diagnose <- function(object) {
 }
 
 #' @export
+#' @examples
+#' # 1) Model summary
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' mx <- growth_mixed(g, response = "height_cm")
+#' print(mx)
+#'
+#' # 2) Fixed effects
+#' nlme::fixef(mx$fit)
+#'
+#' # 3) Invisible return
+#' identical(print(mx), mx)
 print.agri_growth_mixed <- function(x, ...) {
   cat("<agri_growth_mixed> nlme::lme longitudinal growth model\n")
   cat("Response:", x$response_name, " Time:", x$time_name, " Unit:", x$unit_name, "\n")
@@ -214,6 +240,20 @@ print.agri_growth_mixed <- function(x, ...) {
 }
 
 #' @export
+#' @examples
+#' # 1) Printed diagnostics
+#' b <- growth_example_data("bean_repeated")
+#' g <- growth_data(b, time = "day", sampling = "repeated",
+#'                  experimental_unit = "plant_id", treatment = "water_regime")
+#' mx <- growth_mixed(g, response = "height_cm")
+#' print(growth_mixed_diagnose(mx))
+#'
+#' # 2) Structure
+#' str(growth_mixed_diagnose(mx), max.level = 1)
+#'
+#' # 3) Invisible return
+#' md <- growth_mixed_diagnose(mx)
+#' identical(print(md), md)
 print.agri_growth_mixed_diagnostics <- function(x, ...) {
   cat("<agri_growth_mixed_diagnostics>\n")
   cat("Observations:", x$n, " Units:", x$n_units, "\n")

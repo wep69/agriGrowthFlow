@@ -18,8 +18,8 @@
     betagrowth = "beta_growth",
     expolinear = "expolinear"
   )
-  out <- unname(aliases[[key]])
-  if (is.null(out)) {
+  out <- unname(aliases[key])
+  if (is.na(out)) {
     stop("Unknown growth model `", model, "`. Use growth_models() to inspect supported models.", call. = FALSE)
   }
   out
@@ -140,9 +140,14 @@
 #' @export
 #'
 #' @examples
+#' # 1) The complete catalogue
 #' growth_models()
+#'
+#' # 2) Models with a finite upper level
 #' subset(growth_models(), finite_upper_level)
-#' growth_models()[growth_models()$model == "beta_growth", ]
+#'
+#' # 3) Public parameters of one model
+#' growth_models()[growth_models()$model == "richards", "public_parameters"]
 growth_models <- function() {
   .agf_model_registry()
 }

@@ -1,3 +1,34 @@
+# agriGrowthFlow 1.0.1
+
+## Audit fixes
+
+- Fixed `growth_bayes()` and the whole Bayesian layer: nonlinear parameter names
+  no longer contain underscores (`logAsym`, `logScale`, `logShape`), which the
+  current `brms` rejects when the model formula is built.
+- Fixed the global random-number generator leak: every function with a `seed`
+  argument now restores the caller's `.Random.seed` on exit. Previously a seeded
+  call left the generator reprogrammed, so a Monte Carlo loop that passed a fixed
+  seed produced a single replicated realisation.
+- Fixed `growth_threshold()`: when the requested threshold has no crossing, the
+  function now returns a zero-row data frame instead of failing with an internal
+  `data.frame()` error.
+- Fixed `growth_design()`: `design = "auto"` is now resolved from the declared
+  sampling mechanism and the presence of a block, and the requested value is kept
+  in `design_requested` for audit.
+- Fixed `.agf_model_alias()`: an unknown model name now raises the documented
+  `Unknown growth model` error instead of an internal subscript error.
+- `growth_event()` and `growth_defoliation()` now accept `agri_growth_data`
+  objects as well as raw data frames, matching the rest of the package.
+- `growth_table()` now reports which components an object can serve when the
+  requested component has no view.
+
+## Documentation
+
+- Added three numbered usage examples to every documented function in the help
+  pages, including the S3 methods for `print`, `summary`, `plot`, `coef` and
+  `as.data.frame`.
+- Added regression tests for each audit fix.
+
 # agriGrowthFlow 1.0.0
 
 ## Consolidated Release

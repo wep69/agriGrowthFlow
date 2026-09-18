@@ -214,10 +214,16 @@
 #' @export
 #'
 #' @examples
+#' # 1) Automatic starting values for the logistic model
 #' d <- growth_example_data("sunflower_sigmoid")
-#' growth_start(d, "logistic", time = "day", response = "biomass_g")
-#' growth_start(d, "gompertz", time = "day", response = "biomass_g")
-#' growth_start(d, "richards", time = "day", response = "biomass_g")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' growth_start(d1, "logistic", time = "day", response = "biomass_g")
+#'
+#' # 2) Another model
+#' growth_start(d1, "gompertz", time = "day", response = "biomass_g")$start
+#'
+#' # 3) A model with four parameters
+#' growth_start(d1, "richards", time = "day", response = "biomass_g")$start
 growth_start <- function(x, model, time = NULL, response = NULL, group = NULL,
                          aggregate = c("auto", "none", "mean")) {
   model <- .agf_model_alias(model)
@@ -248,6 +254,18 @@ growth_start <- function(x, model, time = NULL, response = NULL, group = NULL,
 }
 
 #' @export
+#' @examples
+#' # 1) Summary of the starting values
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' st <- growth_start(d1, "logistic", time = "day", response = "biomass_g")
+#' print(st)
+#'
+#' # 2) Public bounds
+#' st$lower; st$upper
+#'
+#' # 3) Invisible return
+#' identical(print(st), st)
 print.agri_growth_start <- function(x, ...) {
   cat("<agri_growth_start> model:", x$model, "\n")
   cat("Observations:", x$n, " time support:", paste(.agf_fmt(x$time_range), collapse = " to "), "\n")

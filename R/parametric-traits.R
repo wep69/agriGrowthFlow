@@ -62,12 +62,18 @@
 #' @export
 #'
 #' @examples
+#' # 1) Inflection point
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' f <- growth_fit(d, "logistic", time = "day", response = "biomass_g")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
 #' growth_inflection(f)
-#' growth_inflection(growth_fit(d, "gompertz", time = "day", response = "biomass_g"))
-#' growth_inflection(growth_fit(d, c("logistic", "gompertz"), time = "day", response = "biomass_g"))
+#'
+#' # 2) Isolated values
+#' growth_inflection(f)$inflection_time
+#'
+#' # 3) It coincides with the maximum-rate time for the logistic model
+#' isTRUE(all.equal(growth_inflection(f)$inflection_time,
+#'                  growth_maxrate(f)$time_maximum_rate))
 growth_inflection <- function(object) {
   if (inherits(object, "agri_growth_fit")) return(.agf_inflection_one(object))
   if (inherits(object, "agri_growth_fit_set")) {
@@ -124,12 +130,19 @@ growth_inflection <- function(object) {
 #' @export
 #'
 #' @examples
-#' d <- growth_example_data("wheat_expolinear")
-#' d <- subset(d, nitrogen == unique(d$nitrogen)[1])
-#' f <- growth_fit(d, "expolinear", time = "day", response = "biomass_g_m2")
+#' # 1) Maximum absolute rate
+#' d <- growth_example_data("sunflower_sigmoid")
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
 #' growth_maxrate(f)
-#' growth_maxrate(growth_fit(subset(growth_example_data("sunflower_sigmoid"), cultivar == "C1"), "logistic", time = "day", response = "biomass_g"))
+#'
+#' # 2) Isolated values
 #' growth_maxrate(f)$maximum_absolute_rate
+#'
+#' # 3) Another model has another time of maximum rate
+#' fg <- growth_fit(d1, "gompertz", time = "day", response = "biomass_g")
+#' c(logistic = growth_maxrate(f)$time_maximum_rate,
+#'   gompertz = growth_maxrate(fg)$time_maximum_rate)
 growth_maxrate <- function(object) {
   if (inherits(object, "agri_growth_fit")) return(.agf_maxrate_one(object))
   if (inherits(object, "agri_growth_fit_set")) {
@@ -202,12 +215,17 @@ growth_maxrate <- function(object) {
 #' @export
 #'
 #' @examples
+#' # 1) Time to a fraction of the asymptote
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' f <- growth_fit(d, "logistic", time = "day", response = "biomass_g")
-#' growth_time_to(f, fraction = c(0.1, 0.5, 0.9))
-#' growth_time_to(f, target = c(50, 100))
-#' growth_time_to(f, target = 0)
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' growth_time_to(f, fraction = 0.5)
+#'
+#' # 2) Time to an absolute target
+#' growth_time_to(f, target = 150)
+#'
+#' # 3) Supplying both routes at once is refused
+#' try(growth_time_to(f, fraction = 0.5, target = 150))
 growth_time_to <- function(object, fraction = NULL, target = NULL) {
   if (!xor(is.null(fraction), is.null(target))) stop("Supply exactly one of `fraction` or `target`.", call. = FALSE)
   if (inherits(object, "agri_growth_fit_set")) {
@@ -273,12 +291,19 @@ growth_time_to <- function(object, fraction = NULL, target = NULL) {
 #' @export
 #'
 #' @examples
+#' # 1) Traits of the fit
 #' d <- growth_example_data("sunflower_sigmoid")
-#' d <- subset(d, cultivar == unique(d$cultivar)[1])
-#' f <- growth_fit(d, "logistic", time = "day", response = "biomass_g")
-#' growth_traits(f)
-#' growth_traits(growth_fit(d, c("logistic", "gompertz"), time = "day", response = "biomass_g"))
+#' d1 <- subset(d, cultivar == unique(d$cultivar)[1])
+#' f <- growth_fit(d1, "logistic", time = "day", response = "biomass_g")
+#' growth_traits(f)[, c("asymptote", "inflection_time", "maximum_absolute_rate")]
+#'
+#' # 2) Times at fractions of the asymptote
 #' growth_traits(f)[, c("t10", "t50", "t90")]
+#'
+#' # 3) Traits by group
+#' fc <- growth_fit(d, "logistic", time = "day", response = "biomass_g",
+#'                  group = "cultivar")
+#' growth_traits(fc)[, c("model", "asymptote", "group")]
 growth_traits <- function(object) {
   if (inherits(object, "agri_growth_fit")) return(.agf_traits_one(object))
   if (inherits(object, "agri_growth_fit_set")) {

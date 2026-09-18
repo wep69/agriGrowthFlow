@@ -4,6 +4,42 @@ utils::globalVariables(c(".t", ".y", ".unit", ".group", ".block", "fit", "lower"
   if (is.null(x)) y else x
 }
 
+## Snapshot of the global random-number state. Call once, then register the
+## returned closure with on.exit(restore(), add = TRUE) before a temporary
+## set.seed(), so the caller's generator state is never modified.
+## Resolve an `agri_growth_data` object into a plain data frame plus declared
+## roles. Returns the input unchanged when it is already a data frame.
+.agf_resolve_data <- function(x, time = NULL, response = NULL, unit = NULL,
+                              total_mass = NULL, leaf_mass = NULL,
+                              leaf_area = NULL) {
+  if (!inherits(x, "agri_growth_data")) {
+    return(list(data = x, time = time, response = response, unit = unit,
+                total_mass = total_mass, leaf_mass = leaf_mass,
+                leaf_area = leaf_area))
+  }
+  list(
+    data = x$data,
+    time = time %||% .agf_role(x, "time"),
+    response = response %||% .agf_role(x, "total_mass") %||%
+      .agf_role(x, "leaf_area") %||% .agf_role(x, "leaf_mass"),
+    unit = unit %||% .agf_role(x, "experimental_unit") %||%
+      .agf_role(x, "plant") %||% .agf_role(x, "plot"),
+    total_mass = total_mass %||% .agf_role(x, "total_mass"),
+    leaf_mass = leaf_mass %||% .agf_role(x, "leaf_mass"),
+    leaf_area = leaf_area %||% .agf_role(x, "leaf_area")
+  )
+}
+
+.agf_seed_snapshot <- function() {
+  tinha <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  antes <- if (tinha) get(".Random.seed", envir = .GlobalEnv) else NULL
+  function() {
+    if (tinha) assign(".Random.seed", antes, envir = .GlobalEnv)
+    else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE))
+      rm(".Random.seed", envir = .GlobalEnv)
+  }
+}
+
 .agf_assert_data_frame <- function(data) {
   if (!is.data.frame(data)) {
     stop("`data` must be a data.frame or an object inheriting from data.frame.", call. = FALSE)
